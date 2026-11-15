@@ -19,6 +19,7 @@ TABS = {
     "parliament": "Bundestag Projection",
     "constituencies": "Battleground Map",
     "election": "2025 Election",
+    "state": "State polls",
 }
 
 def esc(s):

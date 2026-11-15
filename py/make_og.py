@@ -410,6 +410,49 @@ def card_state(cfg, sid, slug, en, results):
     draw_bars(c, items, foot_dy=68, base=524)
     return c, t
 
+def card_states(cfg):
+    """/state (the state picker): map of the 16 states coloured by the party leading the latest state polls (same rule as the page:
+    average of the polls of the last cfg.stateWindowDays days before each state's newest poll) + number of states led per party."""
+    geo = json.load(open(os.path.join(HERE, cfg.get("statesMap", "data/germany-states.json")), encoding="utf-8"))
+    labels = cfg.get("labels", {}); win = cfg.get("stateWindowDays", 60); lead = {}; latest = None
+    for st in geo["states"]:
+        slug = (cfg.get("stateFiles") or {}).get(st["id"])
+        path = os.path.join(HERE, cfg.get("stateFolder", "state_polls"), (slug or "") + ".csv")
+        if not slug or not os.path.exists(path): continue
+        rows = list(csv.DictReader(open(path, encoding="utf-8-sig", newline="")))
+        if not rows: continue
+        parties = [k for k in rows[0] if k and k.lower() not in META]
+        polls = sorted(((pdate(r["Datum"]), {p: num(r.get(p)) for p in parties}) for r in rows if pdate(r["Datum"])), key=lambda x: x[0])
+        if not polls: continue
+        t = polls[-1][0]; latest = t if latest is None else max(latest, t)
+        recent = [v for d, v in polls if d >= t - timedelta(days=win)]; avg = {}
+        for p in parties:
+            vals = [v[p] for v in recent if v[p] is not None]
+            if vals and not re.search(r"sonstige|others?|andere", p, re.I): avg[p] = sum(vals) / len(vals)
+        if avg: lead[st["id"]] = max(avg, key=avg.get)
+    def rings(d):
+        out = []
+        for part in d.split("M")[1:]:
+            pts = [tuple(float(v) for v in q.replace("Z", "").split()) for q in part.split("L") if q.replace("Z", "").strip()]
+            if len(pts) > 2: out.append(pts)
+        return out
+    area = lambda r: abs(sum(r[i][0] * r[(i + 1) % len(r)][1] - r[(i + 1) % len(r)][0] * r[i][1] for i in range(len(r)))) / 2
+    shapes = sorted(((st["id"], rings(st["d"])) for st in geo["states"]), key=lambda x: -max((area(r) for r in x[1]), default=0))
+    counts = {}
+    for p in lead.values(): counts[p] = counts.get(p, 0) + 1
+    rows_ = sorted(counts.items(), key=lambda kv: -kv[1]); mh = 420; sc = mh / geo["h"]; mw = geo["w"] * sc; lw = 430; gap = 70
+    mx = (W - (mw + gap + lw)) / 2; my = 200
+    c = Card("State polls", "Who leads the polls in each of the %d states  \u00b7  latest poll %s" % (len(lead), latest.strftime("%d %b %Y").lstrip("0")))
+    for sid, rs in shapes:
+        col = bar_color(party_color(cfg, lead[sid])) if sid in lead else (52, 57, 68)
+        for r in rs: c.d.polygon([((mx + x * sc) * S, (my + y * sc) * S) for x, y in r], fill=col, outline=BG, width=S)
+    rh = min(68, mh / max(1, len(rows_))); lx = mx + mw + gap; ly = my + (mh - rh * len(rows_)) / 2
+    for i, (p, n) in enumerate(rows_):
+        y = ly + i * rh; col = bar_color(party_color(cfg, p)); cy_ = y + rh / 2
+        c.rrect(lx, cy_ - 20, lx + 40, cy_ + 20, 6, col)
+        c.text(lx + 60, cy_, labels.get(p, p), 700, 34, INK, "lm"); c.text(lx + lw, cy_, str(n), 700, 46, INK, "rm")
+    return c, latest
+
 # ---------------------------------------------------------------- main
 def main():
     cfg = json.load(open(os.path.join(HERE, "config.json"), encoding="utf-8"))
@@ -422,6 +465,8 @@ def main():
     for slug, fn in (("polls", card_polls), ("parliament", card_parliament), ("constituencies", card_constituencies)):
         c, t = fn(cfg, polls, parties); c.save(os.path.join(out, slug + ".png")); man[slug] = stamp(t)
     c, t = card_election(cfg); c.save(os.path.join(out, "election.png")); man["election"] = stamp(t)
+    try: c, t = card_states(cfg); c.save(os.path.join(out, "state.png")); man["state"] = stamp(t)
+    except Exception as e: print("  (state picker image skipped: %s)" % e)
     geo = json.load(open(os.path.join(HERE, cfg.get("statesMap", "data/germany-states.json")), encoding="utf-8"))["states"]
     try: sres = json.load(open(os.path.join(HERE, "data", "state_results.json"), encoding="utf-8"))
     except Exception: sres = {}
