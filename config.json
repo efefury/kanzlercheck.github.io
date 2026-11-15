@@ -106,6 +106,8 @@
     "TH": "Thueringen"
   },
   "stateWindowDays": 60,
+  "stateMapSigma": 6,
+  "stateSeats": {"BW": 120, "BY": 180, "BE": 130, "BB": 88, "HB": 87, "HH": 121, "HE": 110, "MV": 79, "NI": 135, "NW": 181, "RP": 101, "SL": 51, "SN": 120, "ST": 87, "SH": 69, "TH": 88},
   "barOrder": [
     "CDU/CSU",
     "AfD",

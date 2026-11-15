@@ -26,7 +26,7 @@
 <meta name="twitter:description" content="German federal election polling average, Bundestag seat projection and government approval. Source: dawum.de">
 <meta name="twitter:image" content="https://kanzlercheck.github.io/img/og/state-BY.png?v=20261020">
 <link rel="canonical" href="https://kanzlercheck.github.io/state/BY/">
-<link rel="stylesheet" href="/css/style.css?v=b55017bbb">
+<link rel="stylesheet" href="/css/style.css?v=babf5299a">
 <script>/* new deploy? the page itself may come from the browser cache (GitHub Pages: 10 min) - compare with /version.json and reload once, like Ctrl+R */(function(){var l=document.querySelector('link[href*="/css/style.css"]'),cur=l?(l.getAttribute("href").split("?v=")[1]||""):"";if(!cur)return;fetch("/version.json",{cache:"no-store"}).then(function(r){return r.ok?r.json():null}).then(function(j){if(!j||!j.v||j.v===cur)return;var k="kc-build";try{if(sessionStorage.getItem(k)===j.v)return;sessionStorage.setItem(k,j.v)}catch(e){return}location.reload()}).catch(function(){})})()</script>
 </head>
 <body>
@@ -42,6 +42,7 @@
     <button class="tab-btn active" data-tab="overview" role="tab" type="button">Overview</button>
     <button class="tab-btn" data-tab="constituencies" role="tab" type="button">Battleground Map</button>
     <button class="tab-btn" data-tab="polls" role="tab" type="button">Polls &amp; Approval</button>
+    <button class="tab-btn" data-tab="state" role="tab" type="button">State Polls</button>
     <button class="tab-btn" data-tab="parliament" role="tab" type="button">Bundestag Projection</button>
     <button class="tab-btn" data-tab="election" role="tab" type="button">2025 Election</button>
   </nav>
@@ -58,6 +59,7 @@
     <button class="tab-btn active" data-tab="overview" role="tab" type="button">Overview</button>
     <button class="tab-btn" data-tab="constituencies" role="tab" type="button">Battleground Map</button>
     <button class="tab-btn" data-tab="polls" role="tab" type="button">Polls &amp; Approval</button>
+    <button class="tab-btn" data-tab="state" role="tab" type="button">State Polls</button>
     <button class="tab-btn" data-tab="parliament" role="tab" type="button">Bundestag Projection</button>
     <button class="tab-btn" data-tab="election" role="tab" type="button">2025 Election</button>
   </nav>
@@ -73,7 +75,6 @@
       <div class="chart-card flow ov-map"><div class="sec">
         <div class="filters" id="ov-mapsw" style="padding:0 0 10px;display:none"><button type="button" class="faction-chip on" data-m="wk">Constituencies</button><button type="button" class="faction-chip" data-m="st">States</button></div>
         <div class="sec-top"><h3 id="map-title">Who leads in each state?</h3></div>
-        <p class="subl">Latest state polls</p>
         <div id="map"></div><div class="pills" id="map-legend"></div><div class="note" id="map-note"></div>
         <div id="ov-comap" style="display:none"></div><div class="pills" id="ov-co-legend" style="display:none"></div>
       </div></div>
@@ -100,10 +101,18 @@
 
   <section id="tab-state" class="pane">
     <div class="row"><button class="link" data-go="overview" type="button">&larr; Back to overview</button></div>
-    <div class="chart-card flow">
-      <div class="filter-row"><div class="fgroup"><div class="ftitle">Filter by date</div><div class="filters" id="state-range"></div></div></div>
-      <div id="state-chart"></div>
+    <div id="state-pdesc" class="st-desc"></div>
+    <div class="chart-card flow" id="state-picker">
+      <div class="sec-top"><h3 id="state-pick-hint">Click a constituency to open it.</h3><div class="filters" id="state-level-pick"></div></div>
+      <div id="state-pmap"></div><div class="pills" id="state-pmap-legend"></div><div class="note" id="state-pmap-note"></div>
+    </div>
+    <div class="chart-card flow" id="state-main" hidden>
+      <div class="row"><button class="link" id="state-all" type="button">&larr; All states</button><div class="filters" id="state-level"></div></div>
+      <div class="filter-row lvs"><div class="fgroup"><div class="ftitle">Filter by date</div><div class="filters" id="state-range"></div></div></div>
+      <div id="state-chart" class="lvs"></div>
       <div class="filters" id="state-pick"></div>
+      <div class="sec lvs" id="state-proj"></div>
+      <div class="sec" id="state-wk" hidden></div>
       <div class="sec"><h3>Latest polls</h3><div class="scroll" id="state-table"></div></div>
     </div>
   </section>
@@ -265,6 +274,6 @@
 </main>
 <div id="tip" class="tip" hidden></div>
 <script data-goatcounter="https://efefury.goatcounter.com/count" data-goatcounter-settings='{"no_onload":true}' async src="//gc.zgo.at/count.js"></script>
-<script src="/js/app.js?v=b55017bbb"></script>
+<script src="/js/app.js?v=babf5299a"></script>
 </body>
 </html>

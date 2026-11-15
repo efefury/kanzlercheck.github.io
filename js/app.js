@@ -64,7 +64,7 @@ function showErr(m){const e=$("#error");e.hidden=false;e.textContent=m;const o=$
 
 let cfg;
 try{
-  const r=await fetch("/config.json");
+  const _bv=((document.querySelector('script[src*="/js/app.js"]')||{}).src||"").split("?v=")[1]||"",r=await fetch("/config.json"+(_bv?"?v="+_bv:""));
   if(!r.ok)throw new Error("HTTP "+r.status);
   cfg=await r.json();
 }catch(e){showErr("config.json could not be loaded ("+e.message+"). Serve the site over http(s) \u2014 opening index.html as a local file will not work \u2014 and make sure config.json sits next to index.html.");return;}
@@ -114,6 +114,7 @@ function parseLoc(){ // current address -> {base: "polls" | "state-BY" | ..., q:
 
 // ---------- tabs ----------
 function goTab(t,target){
+  if(t==="state"){try{showStatePicker().catch(()=>{});}catch(e){}return;}
   const b=document.querySelector(`.tab-btn[data-tab="${t}"]`);if(!b)return;
   track("/"+t,b.textContent.trim());
   document.querySelectorAll(".tab-btn").forEach(x=>x.classList.toggle("active",x.dataset.tab===t));
@@ -171,6 +172,8 @@ const HS=(()=>{
       if(sm){
         if(!stateData[sm[1]])return;tab="state";
         if(initial||curState!==sm[1]||!document.getElementById("tab-state").classList.contains("active"))await openState(sm[1]);
+      }else if(base==="state"){
+        if(initial||curState||!document.getElementById("tab-state").classList.contains("active"))await showStatePicker();
       }else if(document.querySelector(`.tab-btn[data-tab="${base}"]`)){
         if(!initial&&!document.getElementById("tab-"+base).classList.contains("active"))goTab(base);
       }else return;
@@ -204,6 +207,15 @@ try{if(LOC0.base==="overview"||(!document.querySelector(`.tab-btn[data-tab="${LO
 // ---------- SVG helpers ----------
 const LP={"BW":[188.4,642.9],"BY":[364.7,614.4],"BE":[457.6,248.3],"BB":[488.0,304.8],"HB":[176.9,189.3],"HH":[251.8,144.9],"HE":[196.3,430.7],"MV":[422.0,125.9],"NI":[242.7,215.8],"NW":[98.0,345.8],"RP":[78.9,490.2],"SL":[65.8,549.6],"ST":[352.8,312.9],"SN":[449.7,393.5],"SH":[239.9,100.1],"TH":[306.1,408.7]};
 function el(tag,attrs,parent,text){const e=document.createElementNS(NS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);if(text!=null)e.textContent=text;if(parent)parent.appendChild(e);return e;}
+// smooth zooming / panning of the constituency maps: strokes keep their on-screen width through a CSS variable (--u = map units per screen pixel) instead of vector-effect:non-scaling-stroke,
+// which is very slow with hundreds of detailed paths; hover hit-testing is paused while the view moves. Nothing is dropped or simplified.
+function mapMotion(svg,vw){
+  if(!svg)return;
+  if(!svg._u){svg._u=1;svg.classList.add("u-on");if(window.ResizeObserver)new ResizeObserver(()=>{svg._pw=0;}).observe(svg);}
+  const w=svg._pw||(svg._pw=svg.clientWidth||1);
+  svg.style.setProperty("--u",(vw/w).toFixed(5));
+  svg.classList.add("mv");clearTimeout(svg._mvT);svg._mvT=setTimeout(()=>svg.classList.remove("mv"),140);
+}
 const tip=$("#tip");
 const TIPC={};
 function tipColor(n){
@@ -211,7 +223,22 @@ function tipColor(n){
   return TIPC[n]||null;
 }
 const tipCol=c=>c?(isDarkMode()&&dark(c)?"#7A808A":c):null;
+let _tmx=-1,_tmy=-1,_tScroll=0; // scrolling makes the browser fire mousemove on whatever is under the cursor: ignore those (no tooltip rebuild per scroll tick), a real move shows the tooltip again
+addEventListener("scroll",()=>{_tScroll=performance.now();if(!tip.hidden)tip.hidden=true;},{passive:true});
+addEventListener("mousemove",e=>{if(e.clientX===_tmx&&e.clientY===_tmy&&performance.now()-_tScroll<300){e.stopImmediatePropagation();return;}_tmx=e.clientX;_tmy=e.clientY;},true);
+function placeTip(ev,w,h){
+  let x=ev.clientX+16,y=ev.clientY+16;
+  if(ev._touch){ // finger: centre the card above the touch point (the hand covers what is below it), fall back to below
+    x=Math.min(Math.max(8,ev.clientX-w/2),innerWidth-w-8);y=ev.clientY-h-26;if(y<8)y=Math.min(ev.clientY+30,innerHeight-h-8);
+  }else{
+    if(x+w>innerWidth-8)x=ev.clientX-w-16;if(x<8)x=8;
+    if(y+h>innerHeight-8)y=Math.max(8,ev.clientY-h-16);
+  }
+  tip.style.left=x+"px";tip.style.top=y+"px";
+}
 function showTip(ev,html,big){
+  const tk=(big?"B":"S")+html;
+  if(!tip.hidden&&tip._k===tk){placeTip(ev,tip._w,tip._h);return;} // same content as a moment ago: just move it
   const strip=x=>x.replace(/<[^>]*>/g,"").trim(),parts=html.split("<br>");
   let head=parts.shift()||"",hv="";
   const hm=head.match(/^<b>(.*?)<\/b>:\s*(.*)$/);
@@ -240,14 +267,8 @@ function showTip(ev,html,big){
   tip.style.setProperty("--tc",hc);
   tip.innerHTML=`<div class="th"><span>${head}</span>${hv?`<b class="thv">${hv}</b>`:""}</div>${body?`<div class="tbody">${body}</div>`:""}`;
   const w=tip.offsetWidth,h=tip.offsetHeight;
-  let x=ev.clientX+16,y=ev.clientY+16;
-  if(ev._touch){ // finger: centre the card above the touch point (the hand covers what is below it), fall back to below
-    x=Math.min(Math.max(8,ev.clientX-w/2),innerWidth-w-8);y=ev.clientY-h-26;if(y<8)y=Math.min(ev.clientY+30,innerHeight-h-8);
-  }else{
-    if(x+w>innerWidth-8)x=ev.clientX-w-16;if(x<8)x=8;
-    if(y+h>innerHeight-8)y=Math.max(8,ev.clientY-h-16);
-  }
-  tip.style.left=x+"px";tip.style.top=y+"px";
+  tip._k=tk;tip._w=w;tip._h=h;
+  placeTip(ev,w,h);
 }
 const hideTip=()=>{tip.hidden=true;};
 const dlt=n=>Math.abs(n)<.05?"0.0":sgn(n);
@@ -1145,15 +1166,17 @@ function chancellorChart(){
 }
 if(chData.length){chancellorChart();redraw.push(chancellorChart);}
 
-let stateData={},stateGeo={};
+let stateGeoDb="",stateGeoDbc="",stateData={},stateGeo={},stateGeoDims=null,stHasWk=null,stView="wk"; // stView (state picker map): "wk" = constituency level (default), "state" = plain states
 // past state election results for one state, keyed by election date (from data/state_results.json, cached by fetchRaw)
 async function stateResults(id){try{const r=await fetchRaw("data/state_results.json");if(!r.ok)return null;return JSON.parse(r.text)[id]||null;}catch(e){return null;}}
 async function openState(id){
   const s=stateData[id];if(!s)return;
-  document.querySelectorAll(".tab-btn").forEach(x=>x.classList.remove("active"));
+  document.querySelectorAll(".tab-btn").forEach(x=>x.classList.toggle("active",x.dataset.tab==="state"));
   document.querySelectorAll(".pane").forEach(p=>p.classList.toggle("active",p.id==="tab-state"));
+  $("#state-picker").hidden=true;$("#state-main").hidden=false;
   history.replaceState(null,"","/state/"+id);scrollTo(0,0);
   track("/state/"+id,stateGeo[id].en+" polls");
+  if(curState!==id){stateSel=null;stateCust.clear();stateThr={};}
   curState=id;await drawState(id);
 }
 let curState=null,stateRange="all";
@@ -1176,12 +1199,491 @@ async function drawState(id){
   lineChart($("#state-chart"),{H:720,title:en+" poll average",sub:`State election voting intention \u00B7 ${recR.length} poll${recR.length>1?"s":""}, latest ${fmtDate(rec[rec.length-1].t)}`+(results.length?" \u00B7 rings = actual state election results":""),source:"Source: "+cfg.sourceName,
     series,dots,yMin:0,yMax,step,threshold:cfg.threshold,months:stateRange==="6m"||stateRange==="1y"?[1,2,3,4,5,6,7,8,9,10,11]:true,events:true,eventList:EVENTS_FOR(id),results,endLabel:(v,n)=>`${fmt(v)} % ${n}`});
   $("#state-table").innerHTML=pollTableHtml(rec,plist);
+  stateTableClickable(rec);drawStateProj(id);drawStateWk(id);drawStateLevel(id);
   $("#state-range").innerHTML=RANGES.map(r=>`<button type="button" class="faction-chip ${stateRange===r[0]?"on":""}" data-r="${r[0]}">${r[1]}</button>`).join("");
   $("#state-pick").innerHTML=Object.keys(stateData).sort((a,b)=>stateGeo[a].en.localeCompare(stateGeo[b].en)).map(k=>`<button type="button" class="faction-chip ${k===id?"on":""}" data-s="${k}">${stateGeo[k].en}</button>`).join("");
 }
+// ---------- STATE: Landtag projection, coalition options, click a poll to project it ----------
+let stateSel=null; // index into the state's polls of the poll shown in the projection (null = current poll average)
+const stateColor=p=>colorOf(p,parties.indexOf(p))||"#9AA0AA";
+// projection input: either one poll, or the average of the state's polls of the last cfg.stateWindowDays days (same numbers as the map)
+function stateInput(s){
+  if(stateSel!=null&&s.rec[stateSel])return{pct:s.rec[stateSel].v,poll:s.rec[stateSel]};
+  return{pct:s.avg,poll:null};
+}
+// seats: threshold (SSW exempt), then Sainte-Lague on the regular size of the Landtag
+const STATE_SEATS_DEFAULT={BW:120,BY:180,BE:130,BB:88,HB:87,HH:121,HE:110,MV:79,NI:135,NW:181,RP:101,SL:51,SN:120,ST:87,SH:69,TH:88}; // regular Landtag sizes
+let stateThr={}; // manual override for parties close to the threshold: true = counted in the projection, false = removed from it (unset = normal threshold rule)
+function stateSeatsCalc(id,pct,ov){
+  ov=ov||{};
+  const n=(cfg.stateSeats||{})[id]||STATE_SEATS_DEFAULT[id]||100,ok=Object.keys(pct).filter(p=>pct[p]!=null&&!isOther(p)&&(ov[p]===true||(ov[p]!==false&&(pct[p]>=cfg.threshold||(p==="SSW"&&pct[p]>=1)))));
+  const sl=sainteLague(Object.fromEntries(ok.map(p=>[p,pct[p]])),n),out={};
+  ok.forEach(p=>{if(sl[p]>0)out[p]=sl[p];});
+  return{n,maj:Math.floor(n/2)+1,seats:out,elig:ok,out:Object.keys(pct).filter(p=>pct[p]!=null&&!isOther(p)&&!out[p]&&pct[p]>=2).sort((a,b)=>pct[b]-pct[a])};
+}
+// realistic coalitions: minimal majorities (no smaller realistic subset already has a majority, at most 4 parties) plus coalitions that come close to a majority.
+// Realistic = the AfD only together with the CDU/CSU (and nobody else), and no CDU/CSU with the Linke.
+function stateCoalitions(S){
+  const ps=Object.keys(S.seats),res=[],near=[];
+  const sum=c=>c.reduce((a,p)=>a+S.seats[p],0);
+  const realistic=c=>{if(c.includes("AfD")&&!(c.length===2&&c.includes("CDU/CSU")))return false;if(c.includes("CDU/CSU")&&c.includes("Linke"))return false;return true;};
+  const close=Math.max(3,Math.round(S.n*.04)); // "close to a majority": at most this many seats short
+  const rec=(start,cur)=>{
+    if(cur.length>4)return;
+    if(cur.length>0&&realistic(cur)){
+      const t=sum(cur);
+      if(t>=S.maj){if(!cur.some(p=>{const r=cur.filter(q=>q!==p);return r.length&&realistic(r)&&sum(r)>=S.maj;}))res.push(cur.slice());return;}
+      if(cur.length>=2&&cur.length<=3&&S.maj-t<=close)near.push(cur.slice());
+    }
+    for(let i=start;i<ps.length;i++){cur.push(ps[i]);rec(i+1,cur);cur.pop();}
+  };
+  rec(0,[]);
+  res.forEach(c=>c.sort((a,b)=>spec(a)-spec(b)));near.forEach(c=>c.sort((a,b)=>spec(a)-spec(b)));
+  const af=c=>c.includes("AfD")?1:0;
+  return res.sort((a,b)=>af(a)-af(b)||a.length-b.length||sum(a)-sum(b)).slice(0,10)
+    .concat(near.sort((a,b)=>sum(b)-sum(a)||a.length-b.length).slice(0,5));
+}
+function stateHemi(host,S,order,dim){
+  const n=S.n,W=540,Hh=312,cx=W/2,cy=Hh-46,rIn=Math.min(100,cy*.42),rOut=cy-18;
+  let k=2;while(k<80){const pitch=(rOut-rIn)/(k-1),d=Math.PI*k*(rIn+rOut)/(2*n);if(d>=pitch)break;k++;}
+  const pitch=(rOut-rIn)/(k-1),radii=Array.from({length:k},(_,i)=>rIn+i*pitch),circs=radii.map(r=>Math.PI*r),cs=circs.reduce((a,b)=>a+b,0),raw=circs.map(c=>c/cs*n),fl=raw.map(Math.floor);
+  const rem=n-fl.reduce((a,b)=>a+b,0),ord=raw.map((v,i)=>({i,f:v-fl[i]})).sort((a,b)=>b.f-a.f);for(let q=0;q<rem;q++)fl[ord[q%k].i]++;
+  const slots=[];radii.forEach((r,i)=>{for(let q=0;q<fl[i];q++){const angle=fl[i]===1?90:180-q*(180/(fl[i]-1));const[x,y]=pt(cx,cy,r,angle);slots.push({angle,x,y});}});
+  slots.sort((a,b)=>b.angle-a.angle);
+  const owner=[];order.forEach(p=>{for(let q=0;q<(S.seats[p]||0);q++)owner.push(p);});
+  host.innerHTML="";const svg=el("svg",{viewBox:`0 0 ${W} ${Hh}`,role:"img","aria-label":"Landtag seat projection"},host);svg.style.cssText="width:100%;max-width:560px;display:block;margin:0 auto";
+  const dotR=Math.max(2.4,pitch*.46);
+  slots.forEach((s,i)=>{const p=owner[i],c=el("circle",{class:"seat"+(p&&dark(stateColor(p))?" dk":""),cx:s.x.toFixed(2),cy:s.y.toFixed(2),r:dotR.toFixed(2),fill:p?stateColor(p):"#D6D6D2",opacity:p&&dim&&dim(p)?.2:1},svg);
+    if(p){c.addEventListener("mousemove",e=>showTip(e,`<b>${lab(p)}</b>: ${S.seats[p]} seats`));c.addEventListener("mouseleave",hideTip);}});
+  el("text",{class:"ink",x:cx,y:cy-38,"text-anchor":"middle","font-size":32,"font-weight":700},svg,String(n));
+  el("text",{class:"mut",x:cx,y:cy-16,"text-anchor":"middle","font-size":13},svg,"Seats");
+  el("text",{class:"mut",x:cx,y:cy+30,"text-anchor":"middle","font-size":13,"font-weight":700},svg,`${S.maj} needed for majority`);
+}
+let stateCust=new Set(); // parties picked in the clickable legend (custom coalition)
+function drawStateProj(id){
+  const host=$("#state-proj"),s=stateData[id];if(!host||!s)return;
+  const inp=stateInput(s),S=stateSeatsCalc(id,inp.pct,stateThr),en=stateGeo[id].en;
+  const order=Object.keys(S.seats).sort((a,b)=>spec(a)-spec(b)),sum=c=>c.reduce((a,p)=>a+S.seats[p],0);
+  [...stateCust].forEach(p=>{if(!S.seats[p])stateCust.delete(p);});
+  const mem=order.filter(p=>stateCust.has(p));
+  const bar=m=>`<div class="bar"><div>${m.map(p=>`<i class="${dark(stateColor(p))?"dkb":""}" style="width:${S.seats[p]/S.n*100}%;background:${stateColor(p)}"></i>`).join("")}</div><u style="left:${S.maj/S.n*100}%"></u></div>`;
+  const co=stateCoalitions(S);
+  const rows=co.map((c,i)=>{const t=sum(c),nm=c.map(x=>`<span class="cp"><i class="dotc ${dark(stateColor(x))?"dkb":""}" style="background:${stateColor(x)}"></i>${lab(x)}</span>`).join('<span class="pl"> + </span>');
+    return `<tr class="coal-row" data-c="${i}" title="Show in the coalition builder"><td>${nm}</td><td><b>${t}</b></td><td>${fmt(t/S.n*100)}%</td><td class="cb">${bar(c)}</td>${t>=S.maj?`<td class="yes">Majority (+${t-S.maj})</td>`:`<td class="no">Short by ${S.maj-t}</td>`}</tr>`;}).join("");
+  const sub=inp.poll
+    ?`Based on the single ${escF(inp.poll.i||"")} poll of ${fmtDate(inp.poll.t)} \u2013 as if it were the election result.`
+    :`Based on the average of the ${s.n} poll${s.n>1?"s":""} of the last ${cfg.stateWindowDays} days (latest ${fmtDate(s.last)}).`;
+  const leg=order.map(p=>`<span class="st-key"><i class="dotc ${dark(stateColor(p))?"dkb":""}" style="background:${stateColor(p)}"></i>${lab(p)} <b>${S.seats[p]}</b><em>${fmt(inp.pct[p])}%</em></span>`).join("");
+  const nearL=Object.keys(inp.pct).filter(p=>p!=="SSW"&&!isOther(p)&&inp.pct[p]!=null&&((inp.pct[p]>NEAR_LO&&inp.pct[p]<NEAR_HI)||stateThr[p]!==undefined)).sort((a,b)=>inp.pct[b]-inp.pct[a]);
+  const near=nearL.length?`<div class="near5" id="state-near"><h3>Parties close to ${cfg.threshold}%</h3><p class="subl">Add a party just under the threshold to the projection, or remove one just above it. The seats and coalitions update.</p><div class="latest near5-chips">${nearL.map(p=>{const inn=S.elig.includes(p),c=stateColor(p);
+    return `<button type="button" class="chip near5-chip${stateThr[p]!==undefined?" sel":""}${dark(c)?" dk":""}" data-p="${escF(p)}" data-in="${inn?1:0}" aria-pressed="${stateThr[p]!==undefined}" title="${inn?"Remove from the projection":"Add to the projection"}" style="border-left-color:${c}"><span>${escF(lab(p))}</span><b>${fmt(inp.pct[p])}%</b><em class="near5-act">${inn?"\u2212 Remove":"+ Add"}</em></button>`;}).join("")}</div></div>`:"";
+  let cust;
+  if(!mem.length)cust="";
+  else{const t=sum(mem),ok=t>=S.maj;
+    cust=`<div class="cust" id="state-cust"><div class="sec-top"><b>${mem.map(lab).join(" + ")}</b><button class="link" id="state-cust-clear" type="button">Clear</button></div>
+    <div class="res ${ok?"yes":"no"}">${t} of ${S.n} seats \u2014 ${ok?`majority (${t-S.maj} above the ${S.maj} needed)`:`no majority (${S.maj-t} short of the ${S.maj} needed)`} \u00B7 ${fmt(t/S.n*100)}% of seats</div>${bar(mem)}</div>`;}
+  host.innerHTML=`<h3>${en} Landtag projection</h3><p class="subl">${sub}</p>`
+    +(inp.poll?`<div class="pf-bar"><span>Showing the <b>${escF(inp.poll.i||"")}</b> poll of ${fmtDate(inp.poll.t)}.${stWkHas.has(id)?" The constituency map below uses it too.":""}</span><button type="button" class="link" id="state-sel-clear">Back to the poll average &times;</button></div>`:"")
+    +`<div id="state-hemi"></div><div class="st-leg">${leg}</div>${near}${cust}`
+    +`<h3 style="margin-top:22px">Possible coalitions</h3>`
+    +(rows?`<div class="scroll"><table class="coal-t"><thead><tr><th>Coalition</th><th>Seats</th><th>Share</th><th class="cb"></th><th>Majority of ${S.maj}</th></tr></thead><tbody>${rows}</tbody></table></div>`:`<span class="no">No realistic coalition reaches or comes close to a majority in this projection.</span>`)
+    ;
+  stateHemi($("#state-hemi"),S,order,mem.length?p=>!stateCust.has(p):null);
+  const cl=$("#state-sel-clear");if(cl)cl.onclick=()=>{stateSel=null;drawState(id);};
+  host.onclick=e=>{
+    const nb=e.target.closest(".near5-chip");
+    if(nb){const p=nb.dataset.p,wantIn=nb.dataset.in!=="1",normal=(inp.pct[p]>=cfg.threshold);
+      if(wantIn===normal)delete stateThr[p];else stateThr[p]=wantIn;
+      drawStateProj(id);const n=$(`#state-proj .near5-chip[data-p="${CSS.escape(p)}"]`);if(n)n.focus();return;}
+    if(e.target.closest("#state-cust-clear")){stateCust.clear();drawStateProj(id);return;}
+    const r=e.target.closest(".coal-row");
+    if(r){stateCust=new Set(co[+r.dataset.c]);drawStateProj(id);const cb=$("#state-cust");if(cb)cb.scrollIntoView({block:"center",behavior:"smooth"});}
+  };
+}
+// "Latest polls" table of a state: every row can be clicked to project that poll (the table lists the newest polls first)
+function stateTableClickable(rec){
+  const t=$("#state-table");if(!t)return;
+  const cap=Math.min(15,rec.length);
+  t.querySelectorAll("tbody tr").forEach((tr,i)=>{
+    const ix=rec.length-1-i;tr.dataset.si=ix;tr.tabIndex=0;tr.setAttribute("role","button");tr.setAttribute("aria-pressed",String(ix===stateSel));
+    tr.title="Show this poll in the Landtag projection";tr.style.cursor="pointer";
+    if(ix===stateSel)tr.classList.add("pst-on");
+  });
+  if(!t.dataset.clk){t.dataset.clk="1";
+    const pick=e=>{const tr=e.target.closest("tr[data-si]");if(!tr||!curState)return false;const ix=+tr.dataset.si;stateSel=stateSel===ix?null:ix;drawState(curState).then(()=>{if(stateSel!=null){const w=$("#state-wk"),p=stView==="wk"&&w&&!w.hidden&&w.offsetParent?w:$("#state-proj");if(p)p.scrollIntoView({block:"start",behavior:"smooth"});}});return true;};
+    t.addEventListener("click",pick);
+    t.addEventListener("keydown",e=>{if((e.key==="Enter"||e.key===" ")&&e.target.closest("tr[data-si]")){e.preventDefault();pick(e);}});
+  }
+}
+// ---------- STATE: constituency map (appears by itself when data/state_wk/<ID>.json + <ID>.geojson exist) ----------
+// <ID>.json:    {"source","year"/"label","parties":[...],"wk":[{"n":1,"name":"...","v":voters,"s":[share per party, %]}], "sigma":6 (optional)}
+// <ID>.geojson: FeatureCollection (WGS84), properties.n = constituency number
+const stWkLoad=new Map(),stWkViews={},stWkHas=new Set();let stWkCert=false,stWkSwing=false,stWkParty=null,stWkSel=null,stWkId=null; // map views: Leader (optionally one party highlighted) / Swings / Certainty
+function stateWkFiles(id){
+  let p=stWkLoad.get(id);
+  if(!p){p=(async()=>{try{
+    const[a,b]=await Promise.all([fetchRaw(`data/state_wk/${id}.json`),fetchRaw(`data/state_wk/${id}.geojson`)]);
+    if(!a.ok||!b.ok)return null;
+    const D=JSON.parse(a.text),G=JSON.parse(b.text);
+    if(!D||!Array.isArray(D.parties)||!Array.isArray(D.wk)||!G||!Array.isArray(G.features))return null;
+    const m=D.parties.length,wk=D.wk.filter(w=>w&&Array.isArray(w.s)&&w.s.length===m&&w.s.every(x=>typeof x==="number"));
+    const byN=new Map(wk.map(w=>[+w.n,w])),fn=q=>{const v=q.n??q.nr??q.WKR_NR??q.wkr??q.id;return v==null?null:+v;};
+    const feats=G.features.filter(f=>f&&f.geometry&&f.properties&&byN.has(fn(f.properties)));
+    if(!feats.length)return null;
+    const polys=feats.map(f=>{const g=f.geometry,ps=g.type==="Polygon"?[g.coordinates]:g.type==="MultiPolygon"?g.coordinates:[];return ps;});
+    let sy=0,cn=0;polys.forEach(ps=>ps.forEach(pl=>pl[0].forEach(q=>{sy+=q[1];cn++;})));
+    const kx=Math.cos((cn?sy/cn:51)*Math.PI/180);let x0=1e9,x1=-1e9,y0=1e9,y1=-1e9;
+    polys.forEach(ps=>ps.forEach(pl=>pl.forEach(r=>r.forEach(([x,y])=>{x=x*kx;y=-y;x0=Math.min(x0,x);x1=Math.max(x1,x);y0=Math.min(y0,y);y1=Math.max(y1,y);}))));
+    const sc=1000/(x1-x0),bbox=[0,0,1000,(y1-y0)*sc];
+    const rows=feats.map((f,k)=>({w:byN.get(fn(f.properties)),d:polys[k].map(pl=>pl.map(r=>"M"+r.map(([x,y])=>((x*kx-x0)*sc).toFixed(1)+" "+((-y-y0)*sc).toFixed(1)).join("L")+"Z").join("")).join("")}));
+    return{D,rows,bbox,m,polys};
+  }catch(e){return null;}})();stWkLoad.set(id,p);}
+  return p;
+}
+// poll -> constituency shares: the constituency results of the last election are scaled party by party (proportional swing) until the
+// voter-weighted state total equals the poll (iterative fitting). The win chance is a normal curve on the lead over the runner-up.
+function stateWkProject(P,pct){
+  const{D,rows,m}=P,W=rows.map(r=>r.w),wt=W.map(w=>w.v>0?+w.v:1),sw=wt.reduce((a,b)=>a+b,0),parties=D.parties;
+  const base=parties.map((p,j)=>W.reduce((a,w,i)=>a+wt[i]*w.s[j],0)/sw),oi=parties.findIndex(isOther);
+  const pollOf=p=>{if(isOther(p)){let s=null;Object.keys(pct).forEach(k=>{if(isOther(k)&&pct[k]!=null)s=(s||0)+pct[k];});return s;}return pct[p]!=null?pct[p]:null;};
+  let extra=0;Object.keys(pct).forEach(k=>{if(pct[k]!=null&&!isOther(k)&&!parties.includes(k))extra+=pct[k];});
+  let t=parties.map((p,j)=>{const v=pollOf(p);return v!=null?v:base[j];});if(oi>=0)t[oi]+=extra;
+  const ts=t.reduce((a,b)=>a+b,0)||1;t=t.map(v=>v/ts*100);
+  const r=parties.map(()=>1);let X=null;
+  for(let it=0;it<60;it++){
+    X=W.map(w=>{const v=w.s.map((s,j)=>s*r[j]),z=v.reduce((a,b)=>a+b,0)||1;return v.map(q=>q/z*100);});
+    const tot=parties.map((p,j)=>X.reduce((a,x,i)=>a+wt[i]*x[j],0)/sw);let dm=0;
+    parties.forEach((p,j)=>{if(tot[j]>1e-9&&t[j]>0){const f=t[j]/tot[j];dm=Math.max(dm,Math.abs(f-1));r[j]*=f;}});
+    if(dm<1e-5)break;
+  }
+  X=W.map(w=>{const v=w.s.map((s,j)=>s*r[j]),z=v.reduce((a,b)=>a+b,0)||1;return v.map(q=>q/z*100);});
+  const sd=+D.sigma>0?+D.sigma:(+cfg.stateMapSigma>0?+cfg.stateMapSigma:6);
+  const erf=x=>{const s=x<0?-1:1;x=Math.abs(x);const t_=1/(1+.3275911*x);return s*(1-(((((1.061405429*t_-1.453152027)*t_)+1.421413741)*t_-.284496736)*t_+.254829592)*t_*Math.exp(-x*x));};
+  return X.map((x,i)=>{const o=parties.map((p,j)=>j).filter(j=>!isOther(parties[j])).sort((a,b)=>x[b]-x[a]);
+    const lead=o[0],sec=o.length>1?o[1]:null,margin=sec==null?100:x[lead]-x[sec];
+    return{x,lead,sec,margin,prob:Math.max(.5,Math.min(1,.5*(1+erf(margin/sd/Math.SQRT2))))};});
+}
+async function drawStateWk(id){
+  const host=$("#state-wk");if(!host)return;
+  const P=await stateWkFiles(id);
+  if(id!==curState)return;
+  if(!P){host.hidden=true;host.innerHTML="";return;}
+  stWkHas.add(id);
+  {const pb=$("#state-proj .pf-bar span");if(pb&&!/constituency map/.test(pb.textContent))pb.insertAdjacentHTML("beforeend"," The constituency map below uses it too.");}
+  if(stWkId!==id){stWkId=id;stWkSel=null;stWkParty=null;}
+  const s=stateData[id],inp=stateInput(s),Rz=stateWkProject(P,inp.pct),{D,rows,bbox}=P,parties=D.parties,en=stateGeo[id].en,dmk=isDarkMode();
+  const col=j=>stateColor(parties[j]),dc=c=>dmk&&dark(c)?"#7A808A":c;
+  const hexm=(a,b,t)=>{const f=h=>{h=h.replace("#","");return[0,2,4].map(i=>parseInt(h.slice(i,i+2),16));},A=f(a),B=f(b);return"#"+A.map((v,i)=>Math.round(v*(1-t)+B[i]*t).toString(16).padStart(2,"0")).join("");};
+  const bg=dmk?"#D5D8DE":"#F6F5F1",certT=p=>Math.max(0,Math.min(1,(p-.5)/.45));
+  const certFill=(lead,prob)=>{const t=certT(prob),c=col(lead),cc=/^#[0-9a-f]{6}$/i.test(c)?c:"#9AA0AA";return hexm(dmk?dc(cc):hexm(cc,"#000000",.22*t),bg,.92*(1-t));};
+  const certBands=[[.95,"Safe (95%+)"],[.8,"Likely (80\u201395%)"],[.6,"Lean (60\u201380%)"],[0,"Toss-up (under 60%)"]];
+  const sub=`${rows.length} constituencies \u00B7 ${inp.poll?`projected from the single ${escF(inp.poll.i||"")} poll of ${fmtDate(inp.poll.t)}`:"projected from the poll average"}${D.label||D.year?` \u00B7 base: ${escF(D.label||D.year)} constituency results`:""}`;
+  host.hidden=false;
+  host.innerHTML=`<h3>${en} constituency map</h3><p class="subl">${sub}</p>
+    ${inp.poll?`<div class="pf-bar"><span>Showing the <b>${escF(inp.poll.i||"")}</b> poll of ${fmtDate(inp.poll.t)}. This map is calculated from the same poll numbers as the Landtag projection: the last election's constituency results are scaled party by party until the state total matches this poll.</span><button type="button" class="link" id="st-wk-sel-clear">Back to the poll average &times;</button></div>`:""}
+    <div class="group-title" style="margin:0 0 10px">Constituencies led <span class="gt-hint">\u00B7 click a party to highlight the constituencies it leads</span></div>
+    <div id="st-wk-chips" class="latest" style="margin-bottom:12px"></div>
+    <div class="filters" id="st-wk-sw" style="padding:0 0 10px">${[["lead","Leader"],["swing","Swings"],["cert","Certainty"]].map(([k,t])=>`<button type="button" class="faction-chip ${(k==="cert"?stWkCert:k==="swing"?stWkSwing:!stWkCert&&!stWkSwing&&stWkParty==null)?"on":""}" data-m="${k}">${t}</button>`).join("")}</div>
+    <div class="co-mapwrap"><div class="st-wkmap" id="st-wk-map"></div><div class="co-zoom" id="st-wk-zoom"><button type="button" data-z="in" aria-label="Zoom in">+</button><button type="button" data-z="out" aria-label="Zoom out">&minus;</button><button type="button" data-z="reset" aria-label="Reset view">&#8634;</button></div></div>
+    <div class="pills" id="st-wk-legend"></div><div id="st-wk-detail"></div>
+`;
+  {const sc=$("#st-wk-sel-clear");if(sc)sc.onclick=()=>{stateSel=null;drawState(id);};}
+  const mapHost=$("#st-wk-map"),svg=el("svg",{viewBox:bbox.join(" "),role:"img","aria-label":en+" constituency map"},mapHost);
+  let view=stWkViews[id]||[...bbox],AR=bbox[3]/bbox[2];const MAXZ=14;
+  const vbStr=v=>v.map(n=>+n.toFixed(2)).join(" ");
+  const clampV=v=>{const w=Math.min(bbox[2],Math.max(bbox[2]/MAXZ,v[2])),h=w*AR,mx=bbox[2]*.05,my=bbox[3]*.05;
+    return[w>=bbox[2]-.01?bbox[0]:Math.min(Math.max(v[0],bbox[0]-mx),bbox[0]+bbox[2]+mx-w),w>=bbox[2]-.01?bbox[1]:Math.min(Math.max(v[1],bbox[1]-my),bbox[1]+bbox[3]+my-h),w,h];};
+  const setView=v=>{view=clampV(v);stWkViews[id]=view;svg.setAttribute("viewBox",vbStr(view));mapMotion(svg,view[2]);const z=bbox[2]/view[2];mapHost.style.touchAction=z>1.05?"none":"pan-y";
+    const zi=$("#st-wk-zoom [data-z=in]"),zo=$("#st-wk-zoom [data-z=out]");if(zi)zi.disabled=z>=MAXZ-.05;if(zo)zo.disabled=z<=1.01;};
+  let anim=0;
+  const animateTo=t=>{cancelAnimationFrame(anim);const f=[...view],T=clampV(t);
+    if(matchMedia("(prefers-reduced-motion:reduce)").matches){setView(T);return;}
+    const t0=performance.now(),D=420,step=now=>{const k=Math.min(1,(now-t0)/D),e=1-Math.pow(1-k,3);setView(f.map((v,i)=>v+(T[i]-v)*e));if(k<1)anim=requestAnimationFrame(step);};anim=requestAnimationFrame(step);};
+  const zoomAt=(cx,cy,f)=>{const nw=Math.min(bbox[2],Math.max(bbox[2]/MAXZ,view[2]/f));f=view[2]/nw;setView([cx-(cx-view[0])/f,cy-(cy-view[1])/f,nw,nw*AR]);};
+  const toMap=(x,y)=>{const r=svg.getBoundingClientRect();return[view[0]+(x-r.left)/r.width*view[2],view[1]+(y-r.top)/r.height*view[3]];};
+  const lc=j=>dc(/^#[0-9a-f]{6}$/i.test(col(j))?col(j):"#9AA0AA");
+  const prevL=rows.map(r=>{let b=0;(r.w.s||[]).forEach((v,j)=>{if(v>r.w.s[b])b=j;});return b;}); // winner of the last election in each constituency
+  const defs=el("defs",{},svg),pats={};
+  const swingFill=(a,b)=>{const pid="stsw"+a+"_"+b;if(!pats[pid]){const pt=el("pattern",{id:pid,width:7,height:7,patternUnits:"userSpaceOnUse",patternTransform:"rotate(45)"},defs);el("rect",{width:7,height:7,fill:lc(a)},pt);el("rect",{width:3,height:7,fill:lc(b)},pt);pats[pid]=1;}return "url(#"+pid+")";};
+  const hl=stWkParty!=null&&!stWkCert&&!stWkSwing,leaders=[];let selP=null;
+  const paths=rows.map((r,i)=>{const d=Rz[i],isLead=hl&&d.lead===stWkParty,sw=stWkSwing&&d.lead!==prevL[i],
+      c=stWkCert?certFill(d.lead,d.prob):hl?(isLead?lc(d.lead):(dmk?"#2A2E36":"#E2E0DA")):sw?swingFill(d.lead,prevL[i]):lc(d.lead);
+    const p=el("path",{class:"st-wk-p"+(stWkSel===+r.w.n?" sel":""),d:r.d,fill:c},svg);
+    if(stWkSel===+r.w.n)selP=p;else if(isLead)leaders.push(p);
+    p.addEventListener("mousemove",e=>{const o=parties.map((q,j)=>j).sort((a,b)=>d.x[b]-d.x[a]).slice(0,stWkCert?3:5);
+      showTip(e,`<b>${escF(r.w.name||"#"+r.w.n)}</b>${stWkCert?`: ${Math.round(d.prob*100)}%`:""}<br>`+o.map(j=>`${lab(parties[j])}: ${fmt(d.x[j])}%`).join("<br>")+`<br><span style="opacity:.7">${d.prob<.6?"Toss-up":Math.round(d.prob*100)+"% chance for "+lab(parties[d.lead])}</span>`+(sw?`<br><span style="opacity:.7">Swing from ${lab(parties[prevL[i]])} (last election)</span>`:""));});
+    p.addEventListener("mouseleave",hideTip);
+    p.addEventListener("click",()=>{if(mapHost._moved)return;stWkSel=stWkSel===+r.w.n?null:+r.w.n;paths.forEach((q,k)=>q.classList.toggle("sel",stWkSel===+rows[k].w.n));detail();});
+    return p;});
+  leaders.forEach(e=>svg.appendChild(e));if(selP)svg.appendChild(selP);
+  // chips: constituencies led per party (click = highlight where it leads), toss-ups (click = certainty view)
+  {const cnt=parties.map(()=>0);Rz.forEach(d=>cnt[d.lead]++);const toss=Rz.filter(d=>d.prob<.6).length;
+    $("#st-wk-chips").innerHTML=parties.map((q,j)=>j).filter(j=>cnt[j]>0).sort((a,b)=>cnt[b]-cnt[a]).map(j=>{const c=/^#[0-9a-f]{6}$/i.test(col(j))?col(j):"#9AA0AA";
+      return `<div class="chip col${dark(c)?" dk":""}${hl&&stWkParty===j?" sel":""}" data-p="${j}" tabindex="0" role="button" aria-pressed="${hl&&stWkParty===j}" title="Highlight the constituencies ${escF(lab(parties[j]))} leads" style="background:${c};border-color:${c};color:${contrast(c)}"><b>${cnt[j]}</b><span>${lab(parties[j])} \u00B7 constituencies led</span></div>`;}).join("")
+      +`<div class="chip${stWkCert?" sel":""}" data-cert="1" tabindex="0" role="button" aria-pressed="${stWkCert}" title="Show how certain each constituency is" style="border-left-color:#999;cursor:pointer"><b>${toss}</b><span>Toss-ups (lead under 60% likely)</span></div>`;
+    const chipGo=c=>{if(!c)return;if(c.dataset.cert){stWkCert=!stWkCert;stWkParty=null;stWkSwing=false;}else{const j=+c.dataset.p;stWkParty=hl&&stWkParty===j?null:j;stWkCert=false;stWkSwing=false;}drawStateWk(id);};
+    $("#st-wk-chips").onclick=e=>chipGo(e.target.closest(".chip"));
+    $("#st-wk-chips").onkeydown=e=>{if(e.key!=="Enter"&&e.key!==" ")return;const c=e.target.closest(".chip");if(c){e.preventDefault();chipGo(c);}};}
+  function detail(){
+    const box=$("#st-wk-detail");const i=rows.findIndex(r=>+r.w.n===stWkSel);if(i<0){box.innerHTML="";return;}
+    const r=rows[i],d=Rz[i],o=parties.map((q,j)=>j).sort((a,b)=>d.x[b]-d.x[a]).filter(j=>d.x[j]>=1||r.w.s[j]>=1);
+    box.innerHTML=`<div class="cust" style="margin-top:12px"><div class="sec-top"><b>${escF(r.w.name||"#"+r.w.n)}</b><button class="link" id="st-wk-close" type="button">Close</button></div>
+      <div class="res yes">${lab(parties[d.lead])} leads \u2014 ${d.prob<.6?"toss-up":Math.round(d.prob*100)+"% chance"}${d.sec!=null?` \u00B7 ${fmt(d.margin)} points ahead of ${lab(parties[d.sec])}`:""}</div>
+      <div class="scroll"><table><thead><tr><th>Party</th><th>Last election</th><th>Projection</th><th>Change</th></tr></thead><tbody>${o.map(j=>{const ch=Math.round((d.x[j]-r.w.s[j])*10)/10;return`<tr><td><span class="cp"><i class="dotc ${dark(col(j))?"dkb":""}" style="background:${col(j)}"></i>${lab(parties[j])}</span></td><td>${fmt(r.w.s[j])}%</td><td><b>${fmt(d.x[j])}%</b></td><td>${ch>0?"+":ch<0?"\u2212":"\u00B1"}${fmt(Math.abs(ch))}</td></tr>`;}).join("")}</tbody></table></div></div>`;
+    $("#st-wk-close").onclick=()=>{stWkSel=null;paths.forEach(q=>q.classList.remove("sel"));detail();};
+  }
+  detail();
+  // legend
+  const lg=$("#st-wk-legend");
+  if(stWkCert){const cnt=certBands.map(()=>0),pc={};Rz.forEach(d=>{const b=certBands.findIndex(x=>d.prob>=x[0]);cnt[b<0?cnt.length-1:b]++;if(seats){const k=parties[d.lead];seats[k]=(seats[k]||0)+1;}pc[d.lead]=(pc[d.lead]||0)+1;});
+    lg.innerHTML=Object.keys(pc).map(Number).sort((a,b)=>pc[b]-pc[a]).map(j=>`<span>${lab(parties[j])} <i style="width:70px;background:linear-gradient(to right,${certFill(j,.4)},${certFill(j,1)})"></i></span>`).join("")+`<span style="flex-basis:100%;height:0;margin:-6px 0 0"></span>`+certBands.map((x,k)=>`<span>${x[1]} <b>${cnt[k]}</b></span>`).join("");}
+  else if(hl){const led=Rz.filter(d=>d.lead===stWkParty).length;
+    lg.innerHTML=`<span class="co-hl"><i class="hl" style="background:${lc(stWkParty)}"></i>${lab(parties[stWkParty])} leads <b>${led}</b></span><span><i class="fd"></i>Led by another party <b>${Rz.length-led}</b></span>`;}
+  else{const cnt={};Rz.forEach(d=>cnt[d.lead]=(cnt[d.lead]||0)+1);
+    lg.innerHTML=Object.entries(cnt).sort((a,b)=>b[1]-a[1]).map(([j,k])=>`<span><i class="${dark(col(+j))?"dk":""}" style="background:${col(+j)}"></i>${lab(parties[+j])} <b>${k}</b></span>`).join("")
+      +(stWkSwing?(()=>{const n=Rz.filter((d,i)=>d.lead!==prevL[i]).length;return `<span><i style="background:repeating-linear-gradient(45deg,#888 0 3px,#ddd 3px 6px)"></i>Striped = swing (last election's winner in the stripes) <b>${n}</b></span>`;})():"");}
+  $("#st-wk-sw").onclick=e=>{const b=e.target.closest("[data-m]");if(!b)return;const m=b.dataset.m;stWkCert=m==="cert";stWkSwing=m==="swing";stWkParty=null;drawStateWk(id);};
+  // zoom: wheel, pinch, drag, buttons (same behaviour as the federal constituency map)
+  const ptrs=new Map();let pinch=null,drag=null;
+  mapHost.addEventListener("wheel",e=>{const dy=e.deltaMode===1?e.deltaY*16:e.deltaMode===2?e.deltaY*400:e.deltaY,f=Math.exp(-Math.max(-120,Math.min(120,dy))*(e.ctrlKey?.008:.0018));
+    if(!(e.ctrlKey||e.metaKey))return; // plain mouse wheel / two-finger scroll always scrolls the page (zoom: Ctrl/\u2318 + wheel, pinch, + / \u2212 buttons)
+    e.preventDefault();cancelAnimationFrame(anim);hideTip();const[cx,cy]=toMap(e.clientX,e.clientY);zoomAt(cx,cy,f);},{passive:false});
+  mapHost.addEventListener("pointerdown",e=>{if(e.pointerType==="mouse"&&e.button!==0)return;cancelAnimationFrame(anim);ptrs.set(e.pointerId,[e.clientX,e.clientY]);drag={x:e.clientX,y:e.clientY,moved:false};mapHost._moved=false;
+    if(ptrs.size===2){const[a,b]=[...ptrs.values()];pinch={d:Math.hypot(a[0]-b[0],a[1]-b[1])};drag.moved=true;mapHost._moved=true;}});
+  mapHost.addEventListener("pointermove",e=>{if(!ptrs.has(e.pointerId))return;
+    if(e.pointerType==="mouse"&&!(e.buttons&1)){ptrs.delete(e.pointerId);return;}
+    const prev=ptrs.get(e.pointerId);ptrs.set(e.pointerId,[e.clientX,e.clientY]);
+    if(ptrs.size===2&&pinch){const[a,b]=[...ptrs.values()],d=Math.hypot(a[0]-b[0],a[1]-b[1]),[cx,cy]=toMap((a[0]+b[0])/2,(a[1]+b[1])/2);zoomAt(cx,cy,d/pinch.d);pinch.d=d;hideTip();return;}
+    if(ptrs.size!==1||!drag)return;
+    if(!drag.moved){if(Math.hypot(e.clientX-drag.x,e.clientY-drag.y)<5||bbox[2]/view[2]<=1.01)return;drag.moved=true;mapHost._moved=true;try{mapHost.setPointerCapture(e.pointerId);}catch(_){}mapHost.classList.add("grab");}
+    hideTip();const r=svg.getBoundingClientRect();
+    setView([view[0]-(e.clientX-prev[0])/r.width*view[2],view[1]-(e.clientY-prev[1])/r.height*view[3],view[2],view[3]]);});
+  const up=e=>{ptrs.delete(e.pointerId);if(ptrs.size<2)pinch=null;if(!ptrs.size){drag=null;mapHost.classList.remove("grab");setTimeout(()=>{mapHost._moved=false;},0);}};
+  mapHost.addEventListener("pointerup",up);mapHost.addEventListener("pointercancel",up);
+  $("#st-wk-zoom").onclick=e=>{const b=e.target.closest("[data-z]");if(!b)return;
+    if(b.dataset.z==="reset"){animateTo([...bbox]);return;}
+    const f=b.dataset.z==="in"?1.8:1/1.8,cx=view[0]+view[2]/2,cy=view[1]+view[3]/2,w=view[2]/f;animateTo([cx-w/2,cy-w*AR/2,w,w*AR]);};
+  setView(view);
+}
+// ---------- STATE tab: first a map of Germany to pick a state; then either the state level (polls, Landtag projection) or the constituency map ----------
+async function stateHasWk(id){try{const r=await fetchRaw(`data/state_wk/${id}.json`);if(!r.ok)return false;JSON.parse(r.text);return true;}catch(e){return false;}}
+async function showStatePicker(){
+  curState=null;stateSel=null;
+  document.querySelectorAll(".tab-btn").forEach(x=>x.classList.toggle("active",x.dataset.tab==="state"));
+  document.querySelectorAll(".pane").forEach(p=>p.classList.toggle("active",p.id==="tab-state"));
+  $("#state-picker").hidden=false;$("#state-main").hidden=true;
+  history.replaceState(null,"","/state");scrollTo(0,0);
+  track("/state","State polls");
+  await drawStatePicker();
+}
+// State picker, constituency level: a state with its own constituency data (data/state_wk) is drawn as its constituencies, coloured by the projected
+// leader and how certain it is (same projection as on that state's page); all other states stay as one shape.
+const CERT_BANDS=[[.95,"Safe (95%+)"],[.8,"Likely (80\u201395%)"],[.6,"Lean (60\u201380%)"],[0,"Toss-up (under 60%)"]];
+let stPkMode="cert",stPkParty=null,stPkSw=0; // big state map: Certainty (default) / Leader (optionally one party highlighted by name) / Swings
+function stWkFill(parties,lead,prob){
+  const dmk=isDarkMode(),col=stateColor(parties[lead]),cc=/^#[0-9a-f]{6}$/i.test(col)?col:"#9AA0AA",bg=dmk?"#D5D8DE":"#F6F5F1",t=Math.max(0,Math.min(1,(prob-.5)/.45));
+  const mix=(a,b,k)=>{const f=h=>[1,3,5].map(i=>parseInt(h.slice(i,i+2),16)),A=f(a),B=f(b);return"#"+A.map((v,i)=>Math.round(v*(1-k)+B[i]*k).toString(16).padStart(2,"0")).join("");};
+  return mix(dmk?(dark(cc)?"#7A808A":cc):mix(cc,"#000000",.22*t),bg,.92*(1-t));
+}
+// The big state map is drawn ONCE per data / level change; the party buttons only repaint these recorded elements (stPickPaint) - no redraw, no flicker, no scroll jump.
+let stPkRec=null;
+const stPkDim=()=>isDarkMode()?"#2A2E36":"#E2E0DA"; // look of everything NOT won by the highlighted party
+function stPkCol(parties,j){const c=stateColor(parties[j]),cc=/^#[0-9a-f]{6}$/i.test(c)?c:"#9AA0AA";return isDarkMode()&&dark(cc)?"#7A808A":cc;}
+function stPkSwPat(svg,ca,cb){const pid="pksw"+ca.slice(1)+cb.slice(1);
+  if(!svg.querySelector("#"+pid)){const defs=svg.querySelector("defs")||el("defs",{},svg),pt=el("pattern",{id:pid,width:6,height:6,patternUnits:"userSpaceOnUse",patternTransform:"rotate(45)","data-sw":1},defs);el("rect",{width:6,height:6,fill:ca},pt);el("rect",{width:2.6,height:6,fill:cb},pt);}
+  return "url(#"+pid+")";}
+function stPkWkFill(r){ // colour of one constituency in the current view
+  const{d,prv,parties}=r;
+  if(stPkMode==="lead")return stPkParty!=null?(parties[d.lead]===stPkParty?stPkCol(parties,d.lead):stPkDim()):stPkCol(parties,d.lead);
+  if(stPkMode==="swing")return d.lead!==prv?stPkSwPat(stPkRec.svg,stPkCol(parties,d.lead),stPkCol(parties,prv)):stPkCol(parties,d.lead);
+  return stWkFill(parties,d.lead,d.prob);
+}
+function stPickDrawWk(svg,s,P,cnt,seats){
+  const A=61.0036,B=-357.557,C=-97.3655,D=5361.81; // longitude / latitude -> the coordinates of the state map (fitted to data/germany-states.json)
+  const Rz=stateWkProject(P,stateData[s.id].avg),parties=P.D.parties; // always the poll AVERAGE: a single poll picked on a state page never changes this map
+  const dw0=stateData[s.id],cid="stc-"+s.id; // constituencies are clipped to the state outline (no overlaps into the neighbour); the state colour shows through the rest (no gaps)
+  const ubase=dw0&&dw0.lead?colorOf(dw0.lead):"var(--cgrid)";
+  const under=el("path",{d:s.d,fill:ubase,"fill-opacity":.5,"pointer-events":"none"},svg);stPkRec.under.push({e:under,base:ubase});
+  const defs=el("defs",{},svg);el("path",{d:s.d},el("clipPath",{id:cid},defs));
+  const gwk=el("g",{"clip-path":"url(#"+cid+")"},svg);
+  P.rows.forEach((r,i)=>{const d=Rz[i],b=CERT_BANDS.findIndex(x=>d.prob>=x[0]);cnt[b<0?cnt.length-1:b]++;if(seats){const k=parties[d.lead];seats[k]=(seats[k]||0)+1;}
+    const path=P.polys[i].map(pl=>pl.map(ring=>"M"+ring.map(([x,y])=>(A*x+B).toFixed(1)+" "+(C*y+D).toFixed(1)).join("L")+"Z").join("")).join("");
+    let prv=0;(r.w.s||[]).forEach((v,j)=>{if(v>r.w.s[prv])prv=j;});
+    const rec={d,prv,parties,g:gwk,e:null};
+    const e=el("path",{class:"wk",d:path,fill:stPkWkFill(rec)},gwk);rec.e=e;stPkRec.wk.push(rec);
+    e.addEventListener("mousemove",ev=>{const o=parties.map((q,j)=>j).sort((a,b)=>d.x[b]-d.x[a]).slice(0,3);
+      showTip(ev,`<b>${escF(r.w.name||"#"+r.w.n)}</b>: ${Math.round(d.prob*100)}%<br>`+o.map(j=>`${lab(parties[j])}: ${fmt(d.x[j])}%`).join("<br>")+`<br><span style="opacity:.7">${d.prob<.6?"Toss-up":Math.round(d.prob*100)+"% chance for "+lab(parties[d.lead])} \u00B7 ${s.en}</span>`+(stPkMode==="swing"&&d.lead!==prv?`<br><span style="opacity:.7">Swing from ${lab(parties[prv])} (last election)</span>`:""));});
+    e.addEventListener("mouseleave",hideTip);e.addEventListener("click",()=>{if(svg.parentNode._moved)return;hideTip();openState(s.id);});});
+}
+// repaint the big map for the current view (Leader / highlighted party / Swings / Certainty) without rebuilding anything
+function stPickPaint(){
+  const R=stPkRec;if(!R||!R.svg.isConnected)return false;
+  const hlOn=R.wkMode&&stPkMode==="lead"&&stPkParty!=null,dim=stPkDim(),dimTxt=isDarkMode()?"#7C828C":"#9A988F";
+  stPkSw=0;
+  R.wk.forEach(r=>{r.e.setAttribute("fill",stPkWkFill(r));if(stPkMode==="swing"&&r.d.lead!==r.prv)stPkSw++;});
+  if(hlOn)R.wk.forEach(r=>{if(r.parties[r.d.lead]===stPkParty)r.g.appendChild(r.e);}); // the highlighted constituencies lie on top of their neighbours
+  R.under.forEach(u=>{u.e.setAttribute("fill",hlOn?dim:u.base);u.e.setAttribute("fill-opacity",hlOn?1:.5);});
+  // states drawn as one shape (no constituency data): also dimmed when their poll leader is not the highlighted party
+  R.flat.forEach(f=>{const off=hlOn&&!!f.lead&&f.lead!==stPkParty;f.e.style.fill=off?dim:"";
+    f.txt.forEach(t=>{t.setAttribute("fill",off?dimTxt:f.fc);if(t.hasAttribute("stroke"))t.setAttribute("stroke",off?dim:f.c);});});
+  if(R.svg._fixPat)R.svg._fixPat();
+  return true;
+}
+// legend under the map (depends on the view)
+function stPickLegend(){
+  const R=stPkRec,L=$("#state-pmap-legend");if(!R||!L)return;
+  const{wkMode,seats,cnt,wins,nWk}=R;
+  const sl=Object.entries(wkMode?seats:wins).sort((a,b)=>b[1]-a[1]),seatsHtml=sl.map(([p,n])=>`<span><i class="${dark(colorOf(p))?"dk":""}" style="background:${colorOf(p)}"></i>${lab(p)} <b>${n}</b></span>`).join("");
+  const tot=Object.values(seats).reduce((a,b)=>a+b,0);
+  if(wkMode&&stPkMode==="lead"&&stPkParty!=null){const led=seats[stPkParty]||0;L.innerHTML=`<span class="co-hl"><i class="hl" style="background:${colorOf(stPkParty)}"></i>${lab(stPkParty)} leads <b>${led}</b></span><span><i class="fd"></i>Led by another party <b>${tot-led}</b></span>`;}
+  else if(wkMode&&stPkMode==="swing")L.innerHTML=seatsHtml+`<span><i style="background:repeating-linear-gradient(45deg,#888 0 3px,#ddd 3px 6px)"></i>Striped = swing (last election's winner in the stripes) <b>${stPkSw}</b></span>`;
+  else if(wkMode&&stPkMode==="lead")L.innerHTML=seatsHtml;
+  else{L.innerHTML=seatsHtml;
+    if(nWk)L.innerHTML+=`<span style="flex-basis:100%;height:0;margin:-6px 0 0"></span>`+CERT_BANDS.map((x,k)=>`<span>${x[1]} <b>${cnt[k]}</b></span>`).join("");}
+}
+// a party button was pressed: repaint in place and update the buttons' look (the map is never rebuilt)
+function stPickRefresh(){
+  if(!stPickPaint()){drawStatePicker();return;}
+  const ctl=$("#state-pctl");
+  if(ctl){ctl.querySelectorAll(".chip").forEach(c=>{const sel=c.dataset.cert?stPkMode==="cert":(stPkMode==="lead"&&stPkParty===c.dataset.p);c.classList.toggle("sel",sel);c.setAttribute("aria-pressed",String(sel));});
+    ctl.querySelectorAll("[data-m]").forEach(b=>b.classList.toggle("on",stPkMode===b.dataset.m&&(b.dataset.m!=="lead"||stPkParty==null)));}
+  stPickLegend();
+}
+// zoom + pan of the state picker map: wheel, pinch, drag, animated buttons (same behaviour as the federal constituency map; the view is kept when the map is redrawn)
+// Pointer positions are mapped with getBoundingClientRect ratios (not getScreenCTM), because the page is scaled with CSS zoom on big screens and browsers disagree about the CTM then.
+const stPickZ={z:1,cx:null,cy:null};
+function stPickEnableZoom(host,svg){
+  const W=stateGeoDims[0],H=stateGeoDims[1],MAXZ=40;host._moved=false;
+  host.insertAdjacentHTML("beforeend",'<div class="co-zoom"><button type="button" data-z="in" aria-label="Zoom in">+</button><button type="button" data-z="out" aria-label="Zoom out">&minus;</button><button type="button" data-z="reset" aria-label="Reset view">&#8634;</button></div>');
+  const zb=host.querySelector(".co-zoom");
+  let anim=0,raf=0,vb=[0,0,W,H];
+  const fixPat=()=>{const u=vb[2]/(svg._pw||svg.clientWidth||1);svg.querySelectorAll("pattern[data-sw]").forEach(pt=>{const a=pt.firstChild,b=pt.lastChild;pt.setAttribute("width",6*u);pt.setAttribute("height",6*u);a.setAttribute("width",6*u);a.setAttribute("height",6*u);b.setAttribute("width",2.6*u);b.setAttribute("height",6*u);});};svg._fixPat=fixPat;
+  const pageScrolls=()=>document.documentElement.scrollHeight>document.documentElement.clientHeight+8;
+  const geom=()=>{const r=svg.getBoundingClientRect(),ar=(r.height/r.width)||1,w0=Math.max(W,H/ar),w=w0/stPickZ.z;return{w,h:w*ar,ar,w0};};
+  const clamp=(c,len,full)=>len>=full?full/2:Math.min(Math.max(c,len/2-full*.05),full-len/2+full*.05);
+  let mvT=0;const paint=()=>{raf=0;host.classList.add("st-moving");clearTimeout(mvT);mvT=setTimeout(()=>host.classList.remove("st-moving"),160); // while zooming / panning the hairlines between constituencies are left out (smoother); back at rest right after
+    svg.setAttribute("viewBox",vb.map(n=>+n.toFixed(2)).join(" "));mapMotion(svg,vb[2]);
+    fixPat(); // swing stripes keep their size on screen
+    svg.querySelectorAll("text[data-lb]").forEach(t=>{const[x,y]=t.dataset.lb.split(" "),k=(1/stPickZ.z).toFixed(4);t.setAttribute("transform",`translate(${x} ${y}) scale(${k}) translate(${-x} ${-y})`);});};
+  const apply=now=>{const g=geom();stPickZ.cx=clamp(stPickZ.cx==null?W/2:stPickZ.cx,g.w,W);stPickZ.cy=clamp(stPickZ.cy==null?H/2:stPickZ.cy,g.h,H);
+    vb=[stPickZ.cx-g.w/2,stPickZ.cy-g.h/2,g.w,g.h];
+    if(now){cancelAnimationFrame(raf);paint();}else if(!raf)raf=requestAnimationFrame(paint); // many wheel / drag events per frame -> one redraw per frame
+    svg.style.touchAction=stPickZ.z>1.05?"none":"pan-y";zb.querySelector("[data-z=in]").disabled=stPickZ.z>=MAXZ-.01;zb.querySelector("[data-z=out]").disabled=stPickZ.z<=1.01;};
+  const toMap=(x,y)=>{const r=svg.getBoundingClientRect();if(!r.width||!r.height)return[W/2,H/2];return[vb[0]+(x-r.left)/r.width*vb[2],vb[1]+(y-r.top)/r.height*vb[3]];};
+  const zoomAt=(mx,my,f)=>{const g=geom(),nz=Math.min(MAXZ,Math.max(1,stPickZ.z*f)),k=stPickZ.z/nz; // keep the point under the cursor in place
+    const x0=stPickZ.cx-g.w/2,y0=stPickZ.cy-g.h/2;stPickZ.z=nz;stPickZ.cx=mx-(mx-x0)*k+g.w*k/2;stPickZ.cy=my-(my-y0)*k+g.h*k/2;apply();};
+  const animateTo=(z,cx,cy)=>{cancelAnimationFrame(anim);z=Math.min(MAXZ,Math.max(1,z));const f={z:stPickZ.z,cx:stPickZ.cx,cy:stPickZ.cy};
+    if(matchMedia("(prefers-reduced-motion:reduce)").matches){stPickZ.z=z;stPickZ.cx=cx;stPickZ.cy=cy;apply(true);return;}
+    const t0=performance.now(),D=420,step=now=>{const k=Math.min(1,(now-t0)/D),e=1-Math.pow(1-k,3);stPickZ.z=f.z+(z-f.z)*e;stPickZ.cx=f.cx+(cx-f.cx)*e;stPickZ.cy=f.cy+(cy-f.cy)*e;apply();if(k<1)anim=requestAnimationFrame(step);};anim=requestAnimationFrame(step);};
+  if(stPickZ.cx==null){stPickZ.cx=W/2;stPickZ.cy=H/2;}
+  apply(true);if(window.ResizeObserver)new ResizeObserver(()=>apply(true)).observe(svg);
+  svg.addEventListener("wheel",e=>{const dy=e.deltaMode===1?e.deltaY*16:e.deltaMode===2?e.deltaY*400:e.deltaY,f=Math.exp(-Math.max(-120,Math.min(120,dy))*(e.ctrlKey?.008:.0018));
+    if(!(e.ctrlKey||e.metaKey)&&pageScrolls())return; // plain mouse wheel / two-finger scroll scrolls the page when it can (zoom: Ctrl/⌘ + wheel, pinch, + / − buttons); a page that cannot scroll zooms the map instead
+    e.preventDefault();cancelAnimationFrame(anim);hideTip();const[mx,my]=toMap(e.clientX,e.clientY);zoomAt(mx,my,f);},{passive:false});
+  const ptrs=new Map();let pinch=null,drag=null;
+  svg.addEventListener("mousedown",e=>{if(e.button===1&&!pageScrolls())e.preventDefault();}); // no auto-scroll cursor on a page that cannot scroll: the middle button drags the map
+  svg.addEventListener("pointerdown",e=>{if(e.pointerType==="mouse"&&e.button!==0&&e.button!==1)return;cancelAnimationFrame(anim);ptrs.set(e.pointerId,[e.clientX,e.clientY]);drag={x:e.clientX,y:e.clientY,moved:false};host._moved=false;
+    if(ptrs.size===2){const[a,b]=[...ptrs.values()];pinch={d:Math.hypot(a[0]-b[0],a[1]-b[1])};drag.moved=true;host._moved=true;}});
+  svg.addEventListener("pointermove",e=>{if(!ptrs.has(e.pointerId))return;
+    if(e.pointerType==="mouse"&&!(e.buttons&5)){ptrs.delete(e.pointerId);return;}
+    const prev=ptrs.get(e.pointerId);ptrs.set(e.pointerId,[e.clientX,e.clientY]);
+    if(ptrs.size===2&&pinch){const[a,b]=[...ptrs.values()],d=Math.hypot(a[0]-b[0],a[1]-b[1]),[mx,my]=toMap((a[0]+b[0])/2,(a[1]+b[1])/2);zoomAt(mx,my,d/pinch.d);pinch.d=d;hideTip();return;}
+    if(ptrs.size!==1||!drag)return;
+    if(!drag.moved){if(Math.hypot(e.clientX-drag.x,e.clientY-drag.y)<5||stPickZ.z<=1.01)return;drag.moved=true;host._moved=true;try{svg.setPointerCapture(e.pointerId);}catch(_){}}
+    hideTip();const r=svg.getBoundingClientRect();if(!r.width||!r.height)return;
+    stPickZ.cx-=(e.clientX-prev[0])/r.width*vb[2];stPickZ.cy-=(e.clientY-prev[1])/r.height*vb[3];apply();});
+  const up=e=>{ptrs.delete(e.pointerId);if(ptrs.size<2)pinch=null;if(!ptrs.size){drag=null;setTimeout(()=>{host._moved=false;},0);}};
+  svg.addEventListener("pointerup",up);svg.addEventListener("pointercancel",up);
+  zb.onclick=e=>{const b=e.target.closest("[data-z]");if(!b)return;
+    if(b.dataset.z==="reset"){animateTo(1,W/2,H/2);return;}
+    animateTo(stPickZ.z*(b.dataset.z==="in"?1.8:1/1.8),stPickZ.cx,stPickZ.cy);};
+}
+// left panel of the big state map (between "What you see" and the map): constituencies led per party (click = highlight), toss-ups, Leader / Swings / Certainty
+function stPickPanel(on,seats,cnt){
+  let ctl=$("#state-pctl");const pd=$("#state-pdesc");
+  if(!ctl){if(!pd)return;ctl=document.createElement("div");ctl.id="state-pctl";ctl.className="st-pctl";pd.insertAdjacentElement("afterend",ctl);
+    if(window.ResizeObserver)new ResizeObserver(()=>{ctl.style.top=(pd.offsetTop+pd.offsetHeight+14)+"px";}).observe(pd);}
+  ctl.hidden=!on;if(!on)return;
+  const names=Object.keys(seats).filter(p=>seats[p]>0).sort((a,b)=>seats[b]-seats[a]);
+  ctl.innerHTML=`<div class="group-title">Constituencies led</div><div class="latest">`
+    +names.map(p=>{const c=colorOf(p),sel=stPkMode==="lead"&&stPkParty===p;return `<div class="chip col${dark(c)?" dk":""}${sel?" sel":""}" data-p="${escF(p)}" tabindex="0" role="button" aria-pressed="${sel}" title="Highlight the constituencies ${escF(lab(p))} leads" style="background:${c};border-color:${c};color:${contrast(c)}"><b>${seats[p]}</b><span>${escF(lab(p))} \u00B7 constituencies led</span></div>`;}).join("")
+    +`<div class="chip${stPkMode==="cert"?" sel":""}" data-cert="1" tabindex="0" role="button" aria-pressed="${stPkMode==="cert"}" title="Show how certain each constituency is" style="border-left-color:#999;cursor:pointer"><b>${cnt[cnt.length-1]}</b><span>Toss-ups (lead under 60% likely)</span></div></div>`
+    +`<div class="filters">${[["lead","Leader"],["swing","Swings"],["cert","Certainty"]].map(([k,t])=>`<button type="button" class="faction-chip ${stPkMode===k&&(k!=="lead"||stPkParty==null)?"on":""}" data-m="${k}">${t}</button>`).join("")}</div>`;
+  ctl.style.top=(pd.offsetTop+pd.offsetHeight+14)+"px";
+  const go=e=>{const c=e.target.closest(".chip"),b=e.target.closest("[data-m]");
+    if(b){stPkMode=b.dataset.m;stPkParty=null;}
+    else if(c){if(c.dataset.cert){stPkMode=stPkMode==="cert"?"lead":"cert";stPkParty=null;}else{const p=c.dataset.p;stPkParty=stPkMode==="lead"&&stPkParty===p?null:p;stPkMode="lead";}}
+    else return;stPickRefresh();};
+  ctl.onclick=go;ctl.onkeydown=e=>{if((e.key==="Enter"||e.key===" ")&&e.target.closest(".chip")){e.preventDefault();go(e);}};
+}
+async function drawStatePicker(){
+  const host=$("#state-pmap");if(!host||!stateGeoDims||curState)return;
+  if(!stHasWk){const ids=Object.keys(stateGeo),ok=await Promise.all(ids.map(stateHasWk));stHasWk=new Set(ids.filter((_,i)=>ok[i]));if(curState)return;}
+  const wkMode=stView==="wk",WK={};
+  if(wkMode){await Promise.all([...stHasWk].map(async id=>{if(stateData[id])WK[id]=await stateWkFiles(id);}));if(curState)return;} // constituency level: states with their own constituency data are drawn as constituencies
+  $("#state-level-pick").innerHTML=`<button type="button" class="faction-chip ${wkMode?"":"on"}" data-l="state">State level</button><button type="button" class="faction-chip ${wkMode?"on":""}" data-l="wk">Constituency level</button>`;
+  host.innerHTML="";const svg=el("svg",{viewBox:`0 0 ${stateGeoDims[0]} ${stateGeoDims[1]}`,role:"img","aria-label":"Map of Germany"},host);
+  const wins={},labels=[],seats={}; // seats = constituencies won per party (all states with constituency data)
+  stPkRec={svg,wk:[],under:[],flat:[],cnt:null,seats:null,wins:null,wkMode,nWk:0};
+  const cnt=CERT_BANDS.map(()=>0);let nWk=0;stPkSw=0;
+  const geoList=Object.values(stateGeo).map(t=>wkMode&&t.dk?Object.assign({},t,{d:t.dk}):t); // constituency level: state outlines built from the constituencies themselves (py/build_state_outlines.py)
+  geoList.forEach(s=>{
+    const P=WK[s.id];
+    if(P){nWk++;stPickDrawWk(svg,s,P,cnt,seats);return;}
+    const d=stateData[s.id],can=!!d,c=d&&d.lead?colorOf(d.lead):null;
+    const p=el("path",{class:"st"+(c?"":" nodata")+(c&&dark(c)?" dk":"")+(d&&!can?" off":""),d:s.d,fill:c||"",style:can?"cursor:pointer":""},svg);
+    if(c)p.setAttribute("fill",c);
+    const fr={e:p,c,lead:d&&d.lead,txt:[],fc:null};stPkRec.flat.push(fr);
+    p.addEventListener("mousemove",e=>{
+      if(!d){showTip(e,`<b>${s.en}</b><br>No polls found`);return;}
+      if(!can){showTip(e,`<b>${s.en}</b><br>No constituency map yet`);return;}
+      const top=Object.entries(d.avg).sort((a,b)=>b[1]-a[1]).slice(0,5);
+      showTip(e,`<b>${s.en}</b><br>`+top.map(([k,v])=>`${lab(k)}: ${fmt(v)}%`).join("<br>")+`<br><span style="opacity:.7">${d.n} poll${d.n>1?"s":""} \u00B7 latest ${fmtDate(d.last)}</span>`);
+    });
+    p.addEventListener("mouseleave",hideTip);
+    if(can)p.addEventListener("click",()=>{if(host._moved)return;hideTip();openState(s.id);});
+    if(d&&d.lead){if(!wkMode)wins[d.lead]=(wins[d.lead]||0)+1;
+      const tiny=["BE","HB","HH","SL"].includes(s.id),fc=contrast(c),lp=LP[s.id]||[s.cx,s.cy],cx=lp[0],cy=lp[1]+(tiny?0:5),val=d.avg[d.lead],op=can?1:.35;
+      labels.push(()=>{
+        fr.fc=fc;
+        if(tiny){const lw=wkMode?{"data-lb":cx+" "+(cy+2.6),"paint-order":"stroke","stroke-linejoin":"round",stroke:c,"stroke-width":1.6}:{};
+          fr.txt.push(el("text",Object.assign({x:cx,y:wkMode?cy+2.6:cy+4,"text-anchor":"middle","font-size":wkMode?7.5:10.5,"font-weight":wkMode?700:700,fill:fc,opacity:op,"pointer-events":"none"},lw),svg,fmt(val)+"%"));return;}
+        fr.txt.push(el("text",{x:cx,y:cy-12,"text-anchor":"middle","font-size":9,"font-weight":600,fill:fc,opacity:.8*op,"pointer-events":"none"},svg,s.id));
+        fr.txt.push(el("text",{x:cx,y:cy+8,"text-anchor":"middle","font-size":21,"font-weight":800,fill:fc,opacity:op,"pointer-events":"none"},svg,fmt(val)+"%"));
+      });
+    }
+  });
+  if(wkMode){const bo=el("g",{class:"st-border","pointer-events":"none"},svg);if(stateGeoDb){stateGeoDb.split(/(?=M)/).forEach(sd=>el("path",{d:sd,fill:"none",class:"bf"},bo));if(stateGeoDbc)el("path",{d:stateGeoDbc,fill:"none",class:"bc"},bo);}} // one crisp border between the states (data/germany-states.json "db", only the lines between two states)
+  labels.forEach(f=>f());
+  Object.assign(stPkRec,{cnt,seats,wins,nWk});
+  stPickPaint();stPickLegend();stPickPanel(wkMode&&nWk>0,seats,cnt);
+  $("#state-pmap-note").textContent="";
+  const hint=$("#state-pick-hint");if(hint)hint.textContent=wkMode?"Click a constituency to open it.":"Click a state to open it.";
+  const dsc=$("#state-pdesc");if(dsc)dsc.innerHTML=wkMode
+    ?"<b>What you see</b>Every shape is a Landtag (state) constituency, coloured by the party projected to win it from the latest state polls. States without constituency data show the leading party's poll average instead."
+    :"<b>What you see</b>Each Landtag (state) is coloured by the party leading in its latest polls, with that party's poll average shown on top.";
+  stPickEnableZoom(host,svg);
+}
+async function drawStateLevel(id){ // the state page shows polls, projection AND the constituency map together (no more switch between two levels)
+  $("#state-main").classList.remove("lv-wk");$("#state-level").innerHTML="";
+}
+// state chips at the top of the state page
+{const m=$("#state-main"),pk=$("#state-pick"),r=m&&m.querySelector(":scope > .row");if(m&&pk&&r)r.after(pk);}
+$("#state-level-pick").onclick=e=>{const b=e.target.closest("[data-l]");if(!b)return;stView=b.dataset.l==="wk"?"wk":"state";drawStatePicker();};
+$("#state-all").onclick=()=>showStatePicker();
+redraw.push(()=>{if(!curState&&document.getElementById("tab-state").classList.contains("active"))drawStatePicker();});
+HS.reg("state","view",()=>null,v=>{}); // the state page shows polls, projection and constituency map together; nothing to remember
+redraw.push(()=>{if(curState&&document.getElementById("tab-state").classList.contains("active"))drawStateWk(curState);});
 $("#state-pick").onclick=e=>{const b=e.target.closest("[data-s]");if(b)openState(b.dataset.s);};
 $("#state-range").onclick=e=>{const b=e.target.closest("[data-r]");if(!b||!curState)return;stateRange=b.dataset.r;drawState(curState);};
 HS.reg("state","range",()=>stateRange!=="all"?stateRange:null,v=>{const r=RANGES.some(q=>q[0]===v)?v:"all";if(r===stateRange)return;stateRange=r;if(curState)return drawState(curState);});
+HS.reg("state","poll",()=>{const s=curState&&stateData[curState];if(!s||stateSel==null||!s.rec[stateSel])return null;const r=s.rec[stateSel];return new Date(r.t).toISOString().slice(0,10)+"_"+HS.enc(r.i||"");},v=>{
+  const s=curState&&stateData[curState];if(!s)return;let i=null;
+  if(v){const k=v.indexOf("_"),d=k<0?v:v.slice(0,k),inst=k<0?null:HS.dec(v.slice(k+1));
+    for(let q=s.rec.length-1;q>=0;q--)if(new Date(s.rec[q].t).toISOString().slice(0,10)===d&&(inst==null||(s.rec[q].i||"")===inst)){i=q;break;}}
+  if(i===stateSel)return;stateSel=i;return drawState(curState);});
+HS.reg("state","sel",()=>stateCust.size?HS.list([...stateCust].sort((a,b)=>spec(a)-spec(b))):null,v=>{
+  stateCust=new Set(HS.items(v));if(curState)drawStateProj(curState);});
 // state map from state_polls/<State>.csv (written by update_data.cmd)
 async function ovMap(){
   const host=$("#map"),note=$("#map-note");
@@ -1202,8 +1704,8 @@ async function ovMap(){
     }catch(e){return null;}
   }));
   const data=Object.fromEntries(res.filter(Boolean).map(r=>[r.id,r]));
-  stateData=data;stateGeo=Object.fromEntries(geo.states.map(s=>[s.id,s]));
-  const titleEl=$("#map-title"),subEl=document.querySelector(".ov-map .subl"),title0=titleEl.textContent,sub0=subEl.textContent;
+  stateData=data;stateGeo=Object.fromEntries(geo.states.map(s=>[s.id,s]));stateGeoDims=[geo.w,geo.h];stateGeoDb=geo.db||"";stateGeoDbc=geo.dbc||"";
+  const titleEl=$("#map-title"),subEl=document.querySelector(".ov-map .subl"),title0=titleEl.textContent,sub0=subEl?subEl.textContent:"";
   const mixHex=(h,t,a)=>{const f=x=>parseInt(x.replace("#","").length===6?x.replace("#",""):"000000",16),A=f(h),B=f(t),ch=sh=>Math.round(((A>>sh)&255)*(1-a)+((B>>sh)&255)*a).toString(16).padStart(2,"0");return"#"+ch(16)+ch(8)+ch(0);};
   function draw(){
     host.innerHTML="";const svg=el("svg",{viewBox:`0 0 ${geo.w} ${geo.h}`,role:"img"},host);
@@ -1215,7 +1717,7 @@ async function ovMap(){
       shade=v=>{const t=mx>mn?.15+.85*(v-mn)/(mx-mn):1;return dm?mixHex(full,"#D5D8DE",.8*(1-t)):mixHex(full,"#FFFFFF",.9*(1-t));};
     }
     titleEl.textContent=strength?`How strong is ${lab(P)} in each state?`:title0;
-    subEl.textContent=strength?`Latest state polls`:sub0;
+    if(subEl)subEl.textContent=strength?`Latest state polls`:sub0;
     const wins={},labels=[];
     geo.states.forEach(s=>{
       const d=data[s.id],sv=strength&&d&&d.avg[P]!=null?d.avg[P]:null;
@@ -1252,6 +1754,7 @@ async function ovMap(){
   }
   mapRedraw=draw;redraw.push(()=>{if(ovView==="st"&&mapParty)draw();});
   draw();
+  if(!curState&&document.getElementById("tab-state").classList.contains("active"))drawStatePicker();
 }
 await ovMap();
 // show the overview as soon as it is complete (maps drawn, fonts ready, fitted to the screen); the other tabs are built afterwards while the page is already visible
@@ -1739,7 +2242,7 @@ async function drawConstituencies(){
     return[(b[0]+b[2])/2-w/2,(b[1]+b[3])/2-h/2,w,h];};
   const clampV=v=>{const w=Math.min(bbox[2],Math.max(bbox[2]/MAXZ,v[2])),h=w*AR,mx_=bbox[2]*.05,my_=bbox[3]*.05;
     const x=w>=bbox[2]-.01?bbox[0]:Math.min(Math.max(v[0],bbox[0]-mx_),bbox[0]+bbox[2]+mx_-w),y=h>=bbox[3]-.01?bbox[1]:Math.min(Math.max(v[1],bbox[1]-my_),bbox[1]+bbox[3]+my_-h);return[x,y,w,h];};
-  function setView(v){view=clampV(v);if(svgEl)svgEl.setAttribute("viewBox",vbStr(view));
+  function setView(v){view=clampV(v);if(svgEl){svgEl.setAttribute("viewBox",vbStr(view));mapMotion(svgEl,view[2]);}
     const z=bbox[2]/view[2];mapHost.style.touchAction=z>1.05?"none":"pan-y";
     const zi=$("#co-zoom [data-z=in]"),zo=$("#co-zoom [data-z=out]");if(zi)zi.disabled=z>=MAXZ-.05;if(zo)zo.disabled=z<=1.01;}
   function animateTo(t){cancelAnimationFrame(anim);const f=[...view],T=clampV(t);
@@ -1750,7 +2253,7 @@ async function drawConstituencies(){
   if(hasMap){
     const ptrs=new Map();let pinch=null;
     mapHost.addEventListener("wheel",e=>{if(!svgEl)return;const dy=e.deltaMode===1?e.deltaY*16:e.deltaMode===2?e.deltaY*400:e.deltaY,f=Math.exp(-Math.max(-120,Math.min(120,dy))*(e.ctrlKey?.008:.0018));
-      if(f<1&&view[2]>=bbox[2]-.5)return; // fully zoomed out: let the page scroll
+      if(!(e.ctrlKey||e.metaKey))return; // plain mouse wheel / two-finger scroll always scrolls the page (zoom: Ctrl/⌘ + wheel, pinch, + / − buttons)
       e.preventDefault();cancelAnimationFrame(anim);pinned=null;hideTip();const[cx,cy]=toMap(e.clientX,e.clientY);zoomAt(cx,cy,f);},{passive:false});
     mapHost.addEventListener("pointerdown",e=>{ptrType=e.pointerType||"mouse";if(!svgEl||(e.pointerType==="mouse"&&e.button!==0))return;cancelAnimationFrame(anim);ptrs.set(e.pointerId,[e.clientX,e.clientY]);drag={x:e.clientX,y:e.clientY,moved:false};
       if(ptrs.size===2){const[a,b]=[...ptrs.values()];pinch={d:Math.hypot(a[0]-b[0],a[1]-b[1])};drag.moved=true;}});
@@ -2297,6 +2800,7 @@ if(POLS.polls.length&&$("#politician-card")){
 function scaleAll(){
   const g=innerWidth<900?1:Math.max(1,Math.min(innerWidth/1620,innerHeight/911));
   const tb=$("#tabbar"),m=$("main.wrap");
+  document.documentElement.style.setProperty("--zs",g); // page scale, so CSS can size things to the screen (state picker map)
   if(tb)tb.style.zoom=g>1?g:"";
   const sb=$("#sidebar");if(sb)sb.style.zoom=g>1?g:"";
   if(m)m.style.zoom=g>1?g:"";
