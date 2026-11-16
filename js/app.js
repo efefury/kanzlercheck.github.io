@@ -1199,6 +1199,7 @@ async function drawState(id){
   lineChart($("#state-chart"),{H:720,title:en+" poll average",sub:`State election voting intention \u00B7 ${recR.length} poll${recR.length>1?"s":""}, latest ${fmtDate(rec[rec.length-1].t)}`+(results.length?" \u00B7 rings = actual state election results":""),source:"Source: "+cfg.sourceName,
     series,dots,yMin:0,yMax,step,threshold:cfg.threshold,months:stateRange==="6m"||stateRange==="1y"?[1,2,3,4,5,6,7,8,9,10,11]:true,events:true,eventList:EVENTS_FOR(id),results,endLabel:(v,n)=>`${fmt(v)} % ${n}`});
   $("#state-table").innerHTML=pollTableHtml(rec,plist);
+  if((cfg.stateOverhang||{})[id])await stateWkFiles(id); // the seat total depends on the constituency winners
   stateTableClickable(rec);drawStateProj(id);drawStateWk(id);drawStateLevel(id);
   $("#state-range").innerHTML=RANGES.map(r=>`<button type="button" class="faction-chip ${stateRange===r[0]?"on":""}" data-r="${r[0]}">${r[1]}</button>`).join("");
   $("#state-pick").innerHTML=Object.keys(stateData).sort((a,b)=>stateGeo[a].en.localeCompare(stateGeo[b].en)).map(k=>`<button type="button" class="faction-chip ${k===id?"on":""}" data-s="${k}">${stateGeo[k].en}</button>`).join("");
@@ -1216,10 +1217,25 @@ const STATE_SEATS_DEFAULT={BW:120,BY:180,BE:130,BB:88,HB:87,HH:121,HE:110,MV:79,
 let stateThr={}; // manual override for parties close to the threshold: true = counted in the projection, false = removed from it (unset = normal threshold rule)
 function stateSeatsCalc(id,pct,ov){
   ov=ov||{};
-  const n=(cfg.stateSeats||{})[id]||STATE_SEATS_DEFAULT[id]||100,ok=Object.keys(pct).filter(p=>pct[p]!=null&&!isOther(p)&&(ov[p]===true||(ov[p]!==false&&(pct[p]>=cfg.threshold||(p==="SSW"&&pct[p]>=1)))));
-  const sl=sainteLague(Object.fromEntries(ok.map(p=>[p,pct[p]])),n),out={};
-  ok.forEach(p=>{if(sl[p]>0)out[p]=sl[p];});
-  return{n,maj:Math.floor(n/2)+1,seats:out,elig:ok,out:Object.keys(pct).filter(p=>pct[p]!=null&&!isOther(p)&&!out[p]&&pct[p]>=2).sort((a,b)=>pct[b]-pct[a])};
+  const n0=(cfg.stateSeats||{})[id]||STATE_SEATS_DEFAULT[id]||100,ok=Object.keys(pct).filter(p=>pct[p]!=null&&!isOther(p)&&(ov[p]===true||(ov[p]!==false&&(pct[p]>=cfg.threshold||(p==="SSW"&&pct[p]>=1)))));
+  const votes=Object.fromEntries(ok.map(p=>[p,pct[p]])),sl=sainteLague(votes,n0);let seats=sl,n=n0,over=0,comp=0;const extra={};
+  // Overhang: where a state's law lets a party keep constituencies beyond its proportional share (config.json stateOverhang), the projected constituency
+  // winners (stateWkProject) are compared with the Sainte-Laguë seats.  "full" (NRW, SH): the house grows until every party's proportional share covers
+  // its constituencies (an odd size when odd:true).  "double" (NI): the regular size grows by twice the overhang, then everything is recalculated.
+  const oc=(cfg.stateOverhang||{})[id],P=stWkCache[id];
+  if(oc&&P){
+    const R=stateWkProject(P,pct),dc={};R.forEach(r=>{const q=P.D.parties[r.lead];dc[q]=(dc[q]||0)+1;});
+    const d=q=>dc[q]||0;over=ok.reduce((a,q)=>a+Math.max(0,d(q)-sl[q]),0);
+    Object.keys(dc).forEach(q=>{if(!ok.includes(q)&&!isOther(q))extra[q]=dc[q];}); // a party under the threshold keeps the constituencies it wins
+    if(over>0){
+      if(oc.rule==="double"){const nn=n0+2*over;seats=sainteLague(votes,nn);ok.forEach(q=>{if(seats[q]<d(q))seats[q]=d(q);});}
+      else{for(let k=n0;k<n0+500;k++){if(oc.odd&&k%2===0)continue;const q=sainteLague(votes,k);if(ok.every(x=>q[x]>=d(x))){seats=q;break;}}}
+    }
+    n=ok.reduce((a,q)=>a+seats[q],0);comp=Math.max(0,n-n0-over);
+  }
+  const out={};ok.forEach(q=>{if(seats[q]>0)out[q]=seats[q];});
+  Object.keys(extra).forEach(q=>{out[q]=extra[q];n+=extra[q];});
+  return{n,n0,over,comp,rule:oc?oc.rule:null,maj:Math.floor(n/2)+1,seats:out,elig:ok,out:Object.keys(pct).filter(p=>pct[p]!=null&&!isOther(p)&&!out[p]&&pct[p]>=2).sort((a,b)=>pct[b]-pct[a])};
 }
 // realistic coalitions: minimal majorities (no smaller realistic subset already has a majority, at most 4 parties) plus coalitions that come close to a majority.
 // Realistic = the AfD only together with the CDU/CSU (and nobody else), and no CDU/CSU with the Linke.
@@ -1282,7 +1298,8 @@ function drawStateProj(id){
   else{const t=sum(mem),ok=t>=S.maj;
     cust=`<div class="cust" id="state-cust"><div class="sec-top"><b>${mem.map(lab).join(" + ")}</b><button class="link" id="state-cust-clear" type="button">Clear</button></div>
     <div class="res ${ok?"yes":"no"}">${t} of ${S.n} seats \u2014 ${ok?`majority (${t-S.maj} above the ${S.maj} needed)`:`no majority (${S.maj-t} short of the ${S.maj} needed)`} \u00B7 ${fmt(t/S.n*100)}% of seats</div>${bar(mem)}</div>`;}
-  host.innerHTML=`<h3>${en} Landtag projection</h3><p class="subl">${sub}</p>`
+  const ovn=S.over>0?` <b>${S.n} seats</b> instead of the regular ${S.n0}: ${S.over} overhang seat${S.over>1?"s":""} (constituencies won beyond the party's share of the vote) and ${S.comp} compensation seat${S.comp!==1?"s":""} for the other parties${S.rule==="double"?" (Niedersachsen adds twice the overhang)":""}. The size depends on how many constituencies the leading party wins; the map below shows which.`:"";
+  host.innerHTML=`<h3>${en} Landtag projection</h3><p class="subl">${sub}${ovn}</p>`
     +(inp.poll?`<div class="pf-bar"><span>Showing the <b>${escF(inp.poll.i||"")}</b> poll of ${fmtDate(inp.poll.t)}.${stWkHas.has(id)?" The constituency map below uses it too.":""}</span><button type="button" class="link" id="state-sel-clear">Back to the poll average &times;</button></div>`:"")
     +`<div id="state-hemi"></div><div class="st-leg">${leg}</div>${near}${cust}`
     +`<h3 style="margin-top:22px">Possible coalitions</h3>`
@@ -1318,7 +1335,7 @@ function stateTableClickable(rec){
 // ---------- STATE: constituency map (appears by itself when data/state_wk/<ID>.json + <ID>.geojson exist) ----------
 // <ID>.json:    {"source","year"/"label","parties":[...],"wk":[{"n":1,"name":"...","v":voters,"s":[share per party, %]}], "sigma":6 (optional)}
 // <ID>.geojson: FeatureCollection (WGS84), properties.n = constituency number
-const stWkLoad=new Map(),stWkViews={},stWkHas=new Set();let stWkCert=false,stWkSwing=false,stWkParty=null,stWkSel=null,stWkId=null; // map views: Leader (optionally one party highlighted) / Swings / Certainty
+const stWkLoad=new Map(),stWkViews={},stWkHas=new Set(),stWkCache={};let stWkCert=false,stWkSwing=false,stWkParty=null,stWkSel=null,stWkId=null; // map views: Leader (optionally one party highlighted) / Swings / Certainty
 function stateWkFiles(id){
   let p=stWkLoad.get(id);
   if(!p){p=(async()=>{try{
@@ -1336,7 +1353,7 @@ function stateWkFiles(id){
     polys.forEach(ps=>ps.forEach(pl=>pl.forEach(r=>r.forEach(([x,y])=>{x=x*kx;y=-y;x0=Math.min(x0,x);x1=Math.max(x1,x);y0=Math.min(y0,y);y1=Math.max(y1,y);}))));
     const sc=1000/(x1-x0),bbox=[0,0,1000,(y1-y0)*sc];
     const rows=feats.map((f,k)=>({w:byN.get(fn(f.properties)),d:polys[k].map(pl=>pl.map(r=>"M"+r.map(([x,y])=>((x*kx-x0)*sc).toFixed(1)+" "+((-y-y0)*sc).toFixed(1)).join("L")+"Z").join("")).join("")}));
-    return{D,rows,bbox,m,polys};
+    const out={D,rows,bbox,m,polys,id};stWkCache[id]=out;return out;
   }catch(e){return null;}})();stWkLoad.set(id,p);}
   return p;
 }
@@ -1349,14 +1366,26 @@ function stateWkProject(P,pct){
   let extra=0;Object.keys(pct).forEach(k=>{if(pct[k]!=null&&!isOther(k)&&!parties.includes(k))extra+=pct[k];});
   let t=parties.map((p,j)=>{const v=pollOf(p);return v!=null?v:base[j];});if(oi>=0)t[oi]+=extra;
   const ts=t.reduce((a,b)=>a+b,0)||1;t=t.map(v=>v/ts*100);
-  const r=parties.map(()=>1);let X=null;
-  for(let it=0;it<60;it++){
-    X=W.map(w=>{const v=w.s.map((s,j)=>s*r[j]),z=v.reduce((a,b)=>a+b,0)||1;return v.map(q=>q/z*100);});
-    const tot=parties.map((p,j)=>X.reduce((a,x,i)=>a+wt[i]*x[j],0)/sw);let dm=0;
-    parties.forEach((p,j)=>{if(tot[j]>1e-9&&t[j]>0){const f=t[j]/tot[j];dm=Math.max(dm,Math.abs(f-1));r[j]*=f;}});
-    if(dm<1e-5)break;
-  }
-  X=W.map(w=>{const v=w.s.map((s,j)=>s*r[j]),z=v.reduce((a,b)=>a+b,0)||1;return v.map(q=>q/z*100);});
+  // proportional swing: every party's base share is scaled by one party-wide factor until the voter-weighted total equals the target (iterative fitting)
+  const fit=key=>{const r=parties.map(()=>1),sh=w=>w[key];let X=null;
+    for(let it=0;it<60;it++){
+      X=W.map(w=>{const v=sh(w).map((s,j)=>s*r[j]),z=v.reduce((a,b)=>a+b,0)||1;return v.map(q=>q/z*100);});
+      const tot=parties.map((p,j)=>X.reduce((a,x,i)=>a+wt[i]*x[j],0)/sw);let dm=0;
+      parties.forEach((p,j)=>{if(tot[j]>1e-9&&t[j]>0){const f=t[j]/tot[j];dm=Math.max(dm,Math.abs(f-1));r[j]*=f;}});
+      if(dm<1e-5)break;
+    }
+    return W.map(w=>{const v=sh(w).map((s,j)=>s*r[j]),z=v.reduce((a,b)=>a+b,0)||1;return v.map(q=>q/z*100);});};
+  // Which bases are blended (config.json stateBlend[ID] = weights, e.g. {"s":0.2,"p":0.2,"a":0.6}; the weights are normalised):
+  //   s = the last state election (wk[].s), p = the state election before it (wk[].p), a = the 2025 federal result on these constituencies (wk[].a).
+  // Every base is projected to the poll on its own (proportional swing) and the projections are averaged.  Without stateBlend, stateAnchor[ID] = weight of "a" (rest "s").
+  const cb=(cfg.stateBlend||{})[P.id],aw0=Math.max(0,Math.min(1,+((cfg.stateAnchor||{})[P.id])||0));
+  let bw=cb&&typeof cb==="object"?Object.assign({},cb):(aw0>0?{s:1-aw0,a:aw0}:{s:1});
+  Object.keys(bw).forEach(k=>{if(!(+bw[k]>0)||!W.every(w=>Array.isArray(w[k])&&w[k].length===parties.length&&w[k].every(x=>typeof x==="number")))delete bw[k];else bw[k]=+bw[k];});
+  const bs=Object.values(bw).reduce((x,y)=>x+y,0);if(!(bs>0)){bw={s:1};}else Object.keys(bw).forEach(k=>{bw[k]/=bs;});
+  let X;const ks=Object.keys(bw);
+  if(ks.length===1)X=fit(ks[0]);
+  else{const Xs=ks.map(k=>fit(k));X=Xs[0].map((x,i)=>x.map((v,j)=>ks.reduce((acc,k,q)=>acc+bw[k]*Xs[q][i][j],0)));}
+  P.blend=bw;
   const sd=+D.sigma>0?+D.sigma:(+cfg.stateMapSigma>0?+cfg.stateMapSigma:6);
   const erf=x=>{const s=x<0?-1:1;x=Math.abs(x);const t_=1/(1+.3275911*x);return s*(1-(((((1.061405429*t_-1.453152027)*t_)+1.421413741)*t_-.284496736)*t_+.254829592)*t_*Math.exp(-x*x));};
   return X.map((x,i)=>{const o=parties.map((p,j)=>j).filter(j=>!isOther(parties[j])).sort((a,b)=>x[b]-x[a]);
@@ -1377,7 +1406,9 @@ async function drawStateWk(id){
   const bg=dmk?"#D5D8DE":"#F6F5F1",certT=p=>Math.max(0,Math.min(1,(p-.5)/.45));
   const certFill=(lead,prob)=>{const t=certT(prob),c=col(lead),cc=/^#[0-9a-f]{6}$/i.test(c)?c:"#9AA0AA";return hexm(dmk?dc(cc):hexm(cc,"#000000",.22*t),bg,.92*(1-t));};
   const certBands=[[.95,"Safe (95%+)"],[.8,"Likely (80\u201395%)"],[.6,"Lean (60\u201380%)"],[0,"Toss-up (under 60%)"]];
-  const sub=`${rows.length} constituencies \u00B7 ${inp.poll?`projected from the single ${escF(inp.poll.i||"")} poll of ${fmtDate(inp.poll.t)}`:"projected from the poll average"}${D.label||D.year?` \u00B7 base: ${escF(D.label||D.year)} constituency results`:""}`;
+  const sub=`${rows.length} constituencies \u00B7 ${inp.poll?`projected from the single ${escF(inp.poll.i||"")} poll of ${fmtDate(inp.poll.t)}`:"projected from the poll average"}${(()=>{const bw=P.blend||{s:1},nm={s:(D.label||D.year||"last")+" state election",p:(D.prevLabel||"previous")+" state election",a:(D.anchor&&D.anchor.label)||"2025 federal result"},ks=Object.keys(bw);
+      if(ks.length===1&&ks[0]==="s")return D.label||D.year?` \u00B7 base: ${escF(D.label||D.year)} constituency results`:"";
+      return` \u00B7 base: ${ks.map(k=>`${Math.round(bw[k]*100)} % ${escF(nm[k])}`).join(" + ")}`;})()}`;
   host.hidden=false;
   host.innerHTML=`<h3>${en} constituency map</h3><p class="subl">${sub}</p>
     ${inp.poll?`<div class="pf-bar"><span>Showing the <b>${escF(inp.poll.i||"")}</b> poll of ${fmtDate(inp.poll.t)}. This map is calculated from the same poll numbers as the Landtag projection: the last election's constituency results are scaled party by party until the state total matches this poll.</span><button type="button" class="link" id="st-wk-sel-clear">Back to the poll average &times;</button></div>`:""}
