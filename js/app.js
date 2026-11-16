@@ -934,7 +934,7 @@ function renderNear(){
   const t=cfg.threshold,list=PM.order.filter(p=>p!=="SSW"&&!isOther(p)&&PM.pct[p]!=null&&((PM.pct[p]>NEAR_LO&&PM.pct[p]<NEAR_HI)||thrOv[p]!==undefined)).sort((a,b)=>PM.pct[b]-PM.pct[a]);
   if(!list.length){box.hidden=true;box.innerHTML="";return;}
   box.hidden=false;
-  box.innerHTML=`<h3>Parties close to ${t}%</h3><p class="subl">Add a party just under the threshold to the projection, or remove one just above it. The seats and coalitions update.</p><div class="latest near5-chips">${list.map(p=>{
+  box.innerHTML=`<h3>Parties close to ${t}%</h3><div class="latest near5-chips">${list.map(p=>{
     const inn=PM.elig.includes(p),c=colorOf(p,parties.indexOf(p));
     return `<button type="button" class="chip near5-chip${thrOv[p]!==undefined?" sel":""}${dark(c)?" dk":""}" data-p="${escF(p)}" data-in="${inn?1:0}" aria-pressed="${thrOv[p]!==undefined}" title="${inn?"Remove from the projection":"Add to the projection"}" style="border-left-color:${c}"><span>${escF(lab(p))}</span><b>${fmt(PM.pct[p])}%</b><em class="near5-act">${inn?"\u2212 Remove":"+ Add"}</em></button>`;}).join("")}</div>`;
   box.onclick=e=>{const b=e.target.closest(".near5-chip");if(!b)return;const p=b.dataset.p,wantIn=b.dataset.in!=="1";
@@ -1291,14 +1291,14 @@ function drawStateProj(id){
     :`Based on the average of the ${s.n} poll${s.n>1?"s":""} of the last ${cfg.stateWindowDays} days (latest ${fmtDate(s.last)}).`;
   const leg=order.map(p=>`<span class="st-key"><i class="dotc ${dark(stateColor(p))?"dkb":""}" style="background:${stateColor(p)}"></i>${lab(p)} <b>${S.seats[p]}</b><em>${fmt(inp.pct[p])}%</em></span>`).join("");
   const nearL=Object.keys(inp.pct).filter(p=>p!=="SSW"&&!isOther(p)&&inp.pct[p]!=null&&((inp.pct[p]>NEAR_LO&&inp.pct[p]<NEAR_HI)||stateThr[p]!==undefined)).sort((a,b)=>inp.pct[b]-inp.pct[a]);
-  const near=nearL.length?`<div class="near5" id="state-near"><h3>Parties close to ${cfg.threshold}%</h3><p class="subl">Add a party just under the threshold to the projection, or remove one just above it. The seats and coalitions update.</p><div class="latest near5-chips">${nearL.map(p=>{const inn=S.elig.includes(p),c=stateColor(p);
+  const near=nearL.length?`<div class="near5" id="state-near"><h3>Parties close to ${cfg.threshold}%</h3><div class="latest near5-chips">${nearL.map(p=>{const inn=S.elig.includes(p),c=stateColor(p);
     return `<button type="button" class="chip near5-chip${stateThr[p]!==undefined?" sel":""}${dark(c)?" dk":""}" data-p="${escF(p)}" data-in="${inn?1:0}" aria-pressed="${stateThr[p]!==undefined}" title="${inn?"Remove from the projection":"Add to the projection"}" style="border-left-color:${c}"><span>${escF(lab(p))}</span><b>${fmt(inp.pct[p])}%</b><em class="near5-act">${inn?"\u2212 Remove":"+ Add"}</em></button>`;}).join("")}</div></div>`:"";
   let cust;
   if(!mem.length)cust="";
   else{const t=sum(mem),ok=t>=S.maj;
     cust=`<div class="cust" id="state-cust"><div class="sec-top"><b>${mem.map(lab).join(" + ")}</b><button class="link" id="state-cust-clear" type="button">Clear</button></div>
     <div class="res ${ok?"yes":"no"}">${t} of ${S.n} seats \u2014 ${ok?`majority (${t-S.maj} above the ${S.maj} needed)`:`no majority (${S.maj-t} short of the ${S.maj} needed)`} \u00B7 ${fmt(t/S.n*100)}% of seats</div>${bar(mem)}</div>`;}
-  const ovn=S.over>0?` <b>${S.n} seats</b> instead of the regular ${S.n0}: ${S.over} overhang seat${S.over>1?"s":""} (constituencies won beyond the party's share of the vote) and ${S.comp} compensation seat${S.comp!==1?"s":""} for the other parties${S.rule==="double"?" (Niedersachsen adds twice the overhang)":""}. The size depends on how many constituencies the leading party wins; the map below shows which.`:"";
+  const ovn=S.over>0?` <b>${S.n} seats</b> instead of the regular ${S.n0}: ${S.over} overhang seat${S.over>1?"s":""} (constituencies won beyond the party's share of the vote) and ${S.comp} compensation seat${S.comp!==1?"s":""} for the other parties${S.rule==="double"?" (Niedersachsen adds twice the overhang)":""}.`:"";
   host.innerHTML=`<h3>${en} Landtag projection</h3><p class="subl">${sub}${ovn}</p>`
     +(inp.poll?`<div class="pf-bar"><span>Showing the <b>${escF(inp.poll.i||"")}</b> poll of ${fmtDate(inp.poll.t)}.${stWkHas.has(id)?" The constituency map below uses it too.":""}</span><button type="button" class="link" id="state-sel-clear">Back to the poll average &times;</button></div>`:"")
     +`<div id="state-hemi"></div><div class="st-leg">${leg}</div>${near}${cust}`
@@ -1410,7 +1410,7 @@ async function drawStateWk(id){
       if(ks.length===1&&ks[0]==="s")return D.label||D.year?` \u00B7 base: ${escF(D.label||D.year)} constituency results`:"";
       return` \u00B7 base: ${ks.map(k=>`${Math.round(bw[k]*100)} % ${escF(nm[k])}`).join(" + ")}`;})()}`;
   host.hidden=false;
-  host.innerHTML=`<h3>${en} constituency map</h3><p class="subl">${sub}</p>
+  host.innerHTML=`<h3>${en} constituency map</h3>
     ${inp.poll?`<div class="pf-bar"><span>Showing the <b>${escF(inp.poll.i||"")}</b> poll of ${fmtDate(inp.poll.t)}. This map is calculated from the same poll numbers as the Landtag projection: the last election's constituency results are scaled party by party until the state total matches this poll.</span><button type="button" class="link" id="st-wk-sel-clear">Back to the poll average &times;</button></div>`:""}
     <div class="group-title" style="margin:0 0 10px">Constituencies led <span class="gt-hint">\u00B7 click a party to highlight the constituencies it leads</span></div>
     <div id="st-wk-chips" class="latest" style="margin-bottom:12px"></div>
@@ -1498,6 +1498,15 @@ async function drawStateWk(id){
 }
 // ---------- STATE tab: first a map of Germany to pick a state; then either the state level (polls, Landtag projection) or the constituency map ----------
 async function stateHasWk(id){try{const r=await fetchRaw(`data/state_wk/${id}.json`);if(!r.ok)return false;JSON.parse(r.text);return true;}catch(e){return false;}}
+function drawNextStates(){
+  const box=$("#state-next");if(!box)return;
+  const L=(cfg.nextStateElections||[]).map(e=>({...e,t:Date.parse(e.date+"T00:00:00Z")})).filter(e=>!isNaN(e.t)&&(e.exact?e.t>=Date.now()-DAY:true)).sort((a,b)=>a.t-b.t).slice(0,5);
+  if(!L.length){box.innerHTML="";return;}
+  box.innerHTML="<h3>Next state elections</h3>"+L.map(e=>{
+    const d=e.exact?Math.ceil((e.t-Date.now())/DAY):null;
+    const cd=d==null?"":d<=0?"today":d===1?"tomorrow":"in "+d+" days";
+    return `<div class="nx-row" data-s="${e.id}" tabindex="0" role="link" title="Open ${e.name}"><b>${e.name}</b><span>${e.exact?fmtDate(e.t):e.when}${cd?" · "+cd:""}</span></div>`;}).join("");
+}
 async function showStatePicker(){
   curState=null;stateSel=null;
   document.querySelectorAll(".tab-btn").forEach(x=>x.classList.toggle("active",x.dataset.tab==="state"));
@@ -1639,13 +1648,15 @@ function stPickPanel(on,seats,cnt){
   ctl.innerHTML=`<div class="group-title">Constituencies led</div><div class="latest">`
     +names.map(p=>{const c=colorOf(p),sel=stPkMode==="lead"&&stPkParty===p;return `<div class="chip col${dark(c)?" dk":""}${sel?" sel":""}" data-p="${escF(p)}" tabindex="0" role="button" aria-pressed="${sel}" title="Highlight the constituencies ${escF(lab(p))} leads" style="background:${c};border-color:${c};color:${contrast(c)}"><b>${seats[p]}</b><span>${escF(lab(p))} \u00B7 constituencies led</span></div>`;}).join("")
     +`<div class="chip${stPkMode==="cert"?" sel":""}" data-cert="1" tabindex="0" role="button" aria-pressed="${stPkMode==="cert"}" title="Show how certain each constituency is" style="border-left-color:#999;cursor:pointer"><b>${cnt[cnt.length-1]}</b><span>Toss-ups (lead under 60% likely)</span></div></div>`
-    +`<div class="filters">${[["lead","Leader"],["swing","Swings"],["cert","Certainty"]].map(([k,t])=>`<button type="button" class="faction-chip ${stPkMode===k&&(k!=="lead"||stPkParty==null)?"on":""}" data-m="${k}">${t}</button>`).join("")}</div>`;
+    +`<div class="filters">${[["lead","Leader"],["swing","Swings"],["cert","Certainty"]].map(([k,t])=>`<button type="button" class="faction-chip ${stPkMode===k&&(k!=="lead"||stPkParty==null)?"on":""}" data-m="${k}">${t}</button>`).join("")}</div><div class="st-next" id="state-next"></div>`;
+  drawNextStates();
   ctl.style.top=(pd.offsetTop+pd.offsetHeight+14)+"px";
   const go=e=>{const c=e.target.closest(".chip"),b=e.target.closest("[data-m]");
+    const nx=e.target.closest(".nx-row");if(nx){openState(nx.dataset.s);return;}
     if(b){stPkMode=b.dataset.m;stPkParty=null;}
     else if(c){if(c.dataset.cert){stPkMode=stPkMode==="cert"?"lead":"cert";stPkParty=null;}else{const p=c.dataset.p;stPkParty=stPkMode==="lead"&&stPkParty===p?null:p;stPkMode="lead";}}
     else return;stPickRefresh();};
-  ctl.onclick=go;ctl.onkeydown=e=>{if((e.key==="Enter"||e.key===" ")&&e.target.closest(".chip")){e.preventDefault();go(e);}};
+  ctl.onclick=go;ctl.onkeydown=e=>{if((e.key==="Enter"||e.key===" ")&&e.target.closest(".chip,.nx-row")){e.preventDefault();go(e);}};
 }
 async function drawStatePicker(){
   const host=$("#state-pmap");if(!host||!stateGeoDims||curState)return;

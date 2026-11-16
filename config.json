@@ -107,8 +107,8 @@
   },
   "stateWindowDays": 60,
   "stateOverhang": {"NW": {"rule": "full", "odd": true}, "SH": {"rule": "full", "odd": true}, "NI": {"rule": "double"}},
-  "stateAnchor": {"NW": 0.8, "SH": 0.8, "NI": 0.8},
-  "stateBlend": {"NW": {"s": 0.2, "p": 0.2, "a": 0.6}, "SH": {"s": 0.2, "p": 0.2, "a": 0.6}},
+  "stateAnchor": {"NW": 0.8, "SH": 0.8, "NI": 0.25, "BW": 0.1, "BY": 0.25, "BE": 0.1, "BB": 0.15, "HE": 0.25, "MV": 0.1, "RP": 0.1, "SN": 0.15, "ST": 0.1, "TH": 0.15},
+  "stateBlend": {"NW": {"s": 0.45, "p": 0.3, "a": 0.25}, "SH": {"s": 0.45, "p": 0.3, "a": 0.25}},
   "stateMapSigma": 6,
   "stateSeats": {"BW": 120, "BY": 180, "BE": 130, "BB": 88, "HB": 87, "HH": 121, "HE": 110, "MV": 79, "NI": 135, "NW": 181, "RP": 101, "SL": 51, "SN": 120, "ST": 87, "SH": 69, "TH": 88},
   "barOrder": [
@@ -220,5 +220,6 @@
       {"date": "2017-05-07", "label": "State election", "desc": "CDU wins under Daniel Günther"},
       {"date": "2022-05-08", "label": "State election", "desc": "CDU wins again under Daniel Günther"}
     ]
-  }
+  },
+ "nextStateElections": [{"id": "SH", "name": "Schleswig-Holstein", "date": "2027-04-18", "exact": true}, {"id": "SL", "name": "Saarland", "date": "2027-04-18", "exact": true}, {"id": "NW", "name": "Nordrhein-Westfalen", "date": "2027-04-25", "exact": true}, {"id": "HB", "name": "Bremen", "date": "2027-05-30", "exact": true}, {"id": "NI", "name": "Niedersachsen", "date": "2027-12-31", "exact": false, "when": "Autumn 2027 (date not yet set)"}]
 }
