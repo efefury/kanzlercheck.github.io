@@ -2102,5 +2102,47 @@
         "familiarity_pct": 33
       }
     ]
+  },
+  {
+      "poll_info": {
+      "title": "Politikerranking",
+      "source_survey": "INSA-Politikerranking (BILD)",
+      "publish_date": "2026-11-16",
+      "institution": "INSA"
+    },
+    "results": [
+      {
+        "name": "Boris Pistorius",
+        "party": "SPD",
+        "satisfied_pct": 50.1
+      },
+      {
+        "name": "Manuela Schwesig",
+        "party": "SPD",
+        "satisfied_pct": 44.4
+      },
+      {
+        "name": "Cem Özdemir",
+        "party": "Grüne",
+        "satisfied_pct": 44.0
+      },
+      {
+        "name": "Hendrik Wüst",
+        "party": "CDU",
+        "satisfied_pct": 43.4
+      },
+      {
+        "name": "Markus Söder",
+        "party": "CSU",
+        "satisfied_pct": 41.9
+      },
+      {
+        "name": "Friedrich Merz",
+        "party": "CDU",
+        "change": 1,
+        "satisfied_pct": 24,
+        "dissatisfied_pct": 67
+      }
+    ]
   }
 ]
