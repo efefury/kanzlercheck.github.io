@@ -1069,8 +1069,11 @@ if(polls.length){
 }
 
 // ---------- OVERVIEW ----------
+// Overview poll average = the same figures as the Polls & Approval tab (last cfg.pollAverageN polls, each weighted by its pollster's accuracy)
+const ovAvgAt=(p,t)=>p==="SSW"?null:accAvgAt(polls,p,t);
 function ovBars(){
   if(!polls.length)return;
+  const pct={};order.forEach(p=>pct[p]=ovAvgAt(p,tMax));
   const M=CW()<1000,W=M?460:820,base=M?236:206,left=M?30:38,right=M?4:8,maxH=M?170:140,gap=M?6:10;
   const bo=(cfg.barOrder||[]).filter(p=>pct[p]!=null),extra=order.filter(p=>!bo.includes(p)&&!isOther(p)&&pct[p]>=thr);
   const list=[...bo.filter(p=>!isOther(p)),...extra,...bo.filter(isOther)],n=list.length,bw=(W-left-right-(n-1)*gap)/n;
@@ -1081,7 +1084,7 @@ function ovBars(){
   const gov=cfg.government||[];
   list.forEach((p,i)=>{
     const x=left+i*(bw+gap),cx=x+bw/2,v=pct[p],h=Math.max(2,v*scale),top=base-h,c=colorOf(p,parties.indexOf(p));
-    const pv=smoothedValueAt(polls,p,monthAgo(tMax),BW),d=pv!=null?v-pv:null;
+    const pv=ovAvgAt(p,monthAgo(tMax)),d=pv!=null?v-pv:null;
     const g=el("g",{},svg);
     g.addEventListener("mousemove",e=>showTip(e,`<b>${lab(p)}</b>: ${fmt(v)}%${pv!=null?`<br>1 month ago: ${fmt(pv)}%`:""}`));g.addEventListener("mouseleave",hideTip);
     el("rect",{class:dark(c)?"dk":"",x:x.toFixed(1),y:top.toFixed(1),width:bw.toFixed(1),height:h.toFixed(1),fill:c},g);
@@ -1121,10 +1124,11 @@ let mapParty=null,mapRedraw=null,ovView="st",ovCoRedraw=null;
 function setMapParty(p){mapParty=mapParty===p?null:p;ovChips();if(ovView==="wk"){if(ovCoRedraw)ovCoRedraw();}else if(mapRedraw)mapRedraw();}
 function ovChips(){
   if(!polls.length)return;
+  const pct={};order.forEach(p=>pct[p]=ovAvgAt(p,tMax));
   const ord=[...parties].filter(p=>pct[p]!=null&&p!=="Freie Wähler").sort((a,b)=>(isOther(a)-isOther(b))||(pct[b]-pct[a]));
   const box=$("#ov-chips");
   box.innerHTML=ord.map(p=>{
-    const pv=smoothedValueAt(polls,p,monthAgo(tMax),BW),d=pv!=null?pct[p]-pv:null,c=colorOf(p,parties.indexOf(p)),oth=isOther(p);
+    const pv=ovAvgAt(p,monthAgo(tMax)),d=pv!=null?pct[p]-pv:null,c=colorOf(p,parties.indexOf(p)),oth=isOther(p);
     const sty=oth?`border-left-color:${c}`:`background:${c};border-color:${c};color:${contrast(c)}`;
     return `<div class="chip${oth?"":" col"}${dark(c)?" dk":""}${mapParty===p?" sel":""}" data-p="${p}" tabindex="0" role="button" aria-pressed="${mapParty===p}" style="${sty}"><b>${fmt(pct[p])}%${d!=null?`<em class="${d>0?"up":"dn"}">${Math.abs(d)<.05?"\u2013":d>0?"\u25B2":"\u25BC"} ${fmt(Math.abs(d))}</em>`:""}</b><span>${lab(p)}</span></div>`;
   }).join("");
